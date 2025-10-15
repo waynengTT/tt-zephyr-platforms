@@ -47,6 +47,8 @@
 #define PCIE_SII_A_NOC_TLB_DATA_0__REG_OFFSET        0x00000134
 #define PCIE_SII_A_APP_PCIE_CTL_REG_OFFSET           0x0000005C
 #define PCIE_SII_A_LTSSM_STATE_REG_OFFSET            0x00000128
+#define PCIE_SII_A_CSM_START_REG_OFFSET			  	 0x10040000
+#define PCIE_SII_A_CSM_END_REG_OFFSET			   	 0x1007FFFF
 
 static const struct device *const fwtable_dev = DEVICE_DT_GET(DT_NODELABEL(fwtable));
 
@@ -410,6 +412,40 @@ static int pcie_init(void)
 	InitResetInterrupt(1);
 
 	WriteReg(PCIE_INIT_CPL_TIME_REG_ADDR, TimerTimestamp());
+
+	/* Initialize variables, CSM start address */
+	uint32_t csm_addr = PCIE_SII_A_CSM_START_REG_OFFSET;
+	uint32_t prev_ltssm_state = 0;
+	uint32_t curr_ltssm_state = 0;
+	uint32_t elapsed_time;
+	PCIE_SII_LTSSM_STATE_reg_u ltssm_state;
+
+
+	while(1) {
+		/* Read LTSSM state and dump it into CSM using WriteReg */
+		ltssm_state.val = ReadSiiReg(PCIE_SII_A_LTSSM_STATE_REG_OFFSET);
+		curr_ltssm_state = ltssm_state.f.smlh_ltssm_state_sync;
+		elapsed_time = TimerTimestamp();
+
+		/* If the state is the same as the previous state, do not dump */
+		if (curr_ltssm_state == prev_ltssm_state || curr_ltssm_state == 0) {
+			/* State is the same as previous, skip dumping */
+			continue;
+		}
+		prev_ltssm_state = curr_ltssm_state;
+
+		/* Dump LTSSM state and elapsed time into CSM */
+		WriteReg(csm_addr, curr_ltssm_state);
+		csm_addr += 4;
+
+		WriteReg(csm_addr, elapsed_time);
+		csm_addr += 4;
+
+		/* If the CSM is full, wrap to beginning */
+		if (csm_addr >= PCIE_SII_A_CSM_END_REG_OFFSET) {
+			break;
+		}
+	}
 
 	return 0;
 }
