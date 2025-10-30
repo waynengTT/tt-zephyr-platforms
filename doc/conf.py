@@ -23,13 +23,14 @@ from get_ttzp_version import get_ttzp_version  # noqa: E402
 project = "TT Zephyr Platforms"
 copyright = "2025, Tenstorrent AI ULC"
 author = "Tenstorrent AI ULC"
-release = get_ttzp_version()
+release = get_ttzp_version(TTZP / "VERSION")
 extensions = [
     "myst_parser",
     "sphinx.ext.intersphinx",
     "sphinx_rtd_theme",
     "sphinx_tabs.tabs",
     "zephyr.application",
+    "sphinx.ext.graphviz",
 ]
 templates_path = [str(ZEPHYR_BASE / "doc/_templates")]
 exclude_patterns = ["_build_sphinx", "_doxygen/main.md", "Thumbs.db", ".DS_Store"]

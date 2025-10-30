@@ -11,8 +11,10 @@ toolchain:
   - xtools
   - arcmwdt
 supported:
+  - dma
   - smp
   - gpio
+  - dma
   - bh_1x
 testing:
   ignore_tags:

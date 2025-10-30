@@ -312,6 +312,13 @@
 		status = "disabled";
 	};
 
+	dma1: noc_dma@ffb20000 {
+		compatible = "tenstorrent,noc-dma";
+		reg = <0xffb20000 0x20c>;
+		dma-channels = <4>;
+		#dma-cells = <1>;
+	};
+
 	sysclk: system-clock {
 		compatible = "fixed-clock";
 		clock-frequency = <500000000>;
@@ -522,6 +529,19 @@
 	fwtable: fwtable {
 		compatible = "tenstorrent,bh-fwtable";
 		status = "disabled";
+	};
+
+	dmas {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "simple-bus";
+
+		dma0: dma@0 {
+			compatible = "snps,designware-dma-arc-hs";
+			reg = <0>;
+			#dma-cells = <1>;
+			status = "disabled";
+		};
 	};
 
 	soc {

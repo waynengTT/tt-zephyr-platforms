@@ -49,9 +49,10 @@ fi
 
 CONSOLE_DEV="/dev/tenstorrent/$ASIC_ID"
 
-# Export ASIC_ID and console dev as environment variables for use by scripts
+# Export ASIC_ID, BOARD, and console dev as environment variables for use by scripts
 export ASIC_ID
 export CONSOLE_DEV
+export BOARD
 
 if [ -z "$TEST_SET" ]; then
     TEST_SET=":dmc:smc"
@@ -70,6 +71,9 @@ DMC_BOARD=$("$TT_Z_P_ROOT"/scripts/rev2board.sh "$BOARD" dmc)
 # Start by building tt-console, so we can access the device
 echo "Building tt-console..."
 make -C "$TT_Z_P_ROOT"/scripts/tooling -j"$(nproc)"
+
+# Make sure we have STM32 target support
+pyocd pack install stm32g0b1ceux
 
 # Build the tt-bootstrap flash loading algorithms
 echo "Building tt-bootstrap flash loading algorithms..."

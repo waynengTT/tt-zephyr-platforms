@@ -21,20 +21,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  gen-config:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix-config: ${{ steps.gen-config.outputs.matrix-config }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: gen-config
+        shell: bash
+        run: |
+          # Output the entire compact JSON matrix config on one line
+          MATRIX_CONFIG="$(jq -c "." .github/ci_boards.json)"
+          echo "matrix-config=$MATRIX_CONFIG" | tee -a $GITHUB_OUTPUT
+
   hardware-smoke-test:
+    needs: [gen-config]
+    env:
+      ASIC_ID: 0
     strategy:
       fail-fast: false
       matrix:
-        config:
-          - board: p100a
-            runs-on:
-              - p100a-jtag
-          - board: p150a
-            runs-on:
-              - p150a-jtag
-          - board: p300a
-            runs-on:
-              - p300a-jtag
+        config: ${{ fromJson(needs.gen-config.outputs.matrix-config) }}
     runs-on: ${{ matrix.config.runs-on }}
     container:
       image: ghcr.io/tenstorrent/tt-zephyr-platforms/ci-image:v18.12.0-rc1
@@ -59,11 +66,6 @@ jobs:
         uses: ./tt-zephyr-platforms/.github/workflows/prepare-container
         with:
           app-path: tt-zephyr-platforms
-
-      - name: Set ASIC ID
-        shell: bash
-        run: |
-          echo "ASIC_ID=0" >> "$GITHUB_ENV"
 
       - name: run-dmc-tests
         run: |
@@ -122,19 +124,11 @@ jobs:
           python3 ./scripts/dump_smc_state.py --asic-id $ASIC_ID
 
   smoke-e2e-test:
+    needs: [gen-config]
     strategy:
       fail-fast: false
       matrix:
-        config:
-          - board: p100a
-            runs-on:
-              - p100a-jtag
-          - board: p150a
-            runs-on:
-              - p150a-jtag
-          - board: p300a
-            runs-on:
-              - p300a-jtag
+        config: ${{ fromJson(needs.gen-config.outputs.matrix-config) }}
     runs-on: ${{ matrix.config.runs-on }}
     container:
       image: ghcr.io/tenstorrent/tt-zephyr-platforms/ci-image:v18.12.0-rc1
@@ -165,10 +159,6 @@ jobs:
         run: |
           echo "ASIC_ID=0" >> "$GITHUB_ENV"
 
-      - name: run-e2e-tests
-        run: |
-          tt-zephyr-platforms/scripts/ci/run-e2e.sh -p $ASIC_ID ${{ matrix.config.board }}
-
       - name: Check signing key
         shell: bash
         run: |
@@ -181,9 +171,9 @@ jobs:
           fi
           echo "SIGNATURE_KEY_FILE=$SIGNATURE_KEY_FILE" >> "$GITHUB_ENV"
 
-      - name: run-e2e-bl2-test
+      - name: run-e2e-tests
         run: |
-          tt-zephyr-platforms/scripts/ci/run-bl2.sh -k $SIGNATURE_KEY_FILE \
+          tt-zephyr-platforms/scripts/ci/run-e2e.sh -k $SIGNATURE_KEY_FILE \
             -p $ASIC_ID ${{ matrix.config.board }}
 
       - name: Upload E2E Test results
