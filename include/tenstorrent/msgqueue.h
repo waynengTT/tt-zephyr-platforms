@@ -110,8 +110,13 @@ struct power_setting_rqst {
 		 */
 		uint16_t tensix_enable: 1;
 
+		/** @brief 1 - @ref bh_set_l2cpu_enable "Enable L2CPU cores"
+		 * <br> 0 - @ref bh_set_l2cpu_enable "Disable L2CPU cores"
+		 */
+		uint16_t l2cpu_enable: 1;
+
 		/** @brief Future use flags currently not supported*/
-		uint16_t future_use: 12;
+		uint16_t future_use: 11;
 
 		/** @brief Reserved*/
 		uint16_t reserved: 1;
@@ -210,6 +215,68 @@ struct get_voltage_curve_from_freq_rqst {
 	uint32_t input_freq_mhz;
 };
 
+/** @brief Host request for debug NOC translation
+ * @details Messages of this type are processed by @ref debug_noc_translation_handler
+ */
+struct debug_noc_translation_rqst {
+	/** @brief The command code corresponding to @ref TT_SMC_MSG_DEBUG_NOC_TRANSLATION */
+	uint8_t command_code;
+
+	/** @brief Enable or disable NOC translation*/
+	uint8_t enable_translation: 1;
+
+	/** @brief The PCIE instance */
+	uint8_t pcie_instance: 1;
+
+	/** @brief Set to 1 to use pcie instance from the  @ref pcie_instance field, or 0 to
+	 *         get the pcie instance from FW table
+	 */
+	uint8_t pcie_instance_override: 1;
+
+	/** @brief Bitmask of bad tensix columns */
+	uint16_t bad_tensix_cols;
+
+	/** @brief Instance number of the bad GDDR. 0xFF if all GDDR are good */
+	uint8_t bad_gddr;
+
+	/** @brief low byte of skip_eth field*/
+	uint8_t skip_eth_low;
+
+	/** @brief hi byte of skip_eth field*/
+	uint8_t skip_eth_hi;
+};
+
+/** @brief Host request to ping DMC
+ * @details Messages of this type are processed by @ref ping_dm_handler
+ */
+struct dmc_ping_rqst {
+	/** @brief The command code corresponding to @ref TT_SMC_MSG_PING_DM */
+	uint8_t command_code;
+
+	/** @brief Three bytes of padding */
+	uint8_t pad[3];
+
+	/** @brief Use legacy ping mode */
+	bool legacy_ping;
+};
+
+/** @brief Host request to send PCIE MSI
+ * @details Messages of this type are processed by @ref send_pcie_msi_handler
+ */
+struct send_pcie_msi_rqst {
+	/** @brief The command code corresponding to @ref TT_SMC_MSG_SEND_PCIE_MSI */
+	uint8_t command_code;
+
+	/** @brief The PCIE instance 0 or 1 */
+	uint8_t pcie_inst: 1;
+
+	/** @brief 2 bytes of padding */
+	uint8_t pad[2];
+
+	/** @brief MSI vector ID */
+	uint32_t vector_id;
+};
+
 /** @brief A tenstorrent host request*/
 union request {
 	/** @brief The interpretation of the request as an array of uint32_t entries*/
@@ -246,6 +313,15 @@ union request {
 
 	/** @brief A get voltage curve from frequency request */
 	struct get_voltage_curve_from_freq_rqst get_voltage_curve_from_freq;
+
+	/** @brief A debug NOC translation request */
+	struct debug_noc_translation_rqst debug_noc_translation;
+
+	/** @brief A dmc ping request */
+	struct dmc_ping_rqst dmc_ping;
+
+	/** @brief A Send PCIE MSI request */
+	struct send_pcie_msi_rqst send_pci_msi;
 };
 
 /** @} */

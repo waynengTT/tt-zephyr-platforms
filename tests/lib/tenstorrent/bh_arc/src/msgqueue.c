@@ -4,17 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <zephyr/drivers/clock_control.h>
+#include <zephyr/drivers/clock_control/clock_control_tt_bh.h>
 #include <zephyr/ztest.h>
 
 #include <tenstorrent/smc_msg.h>
 #include <tenstorrent/msgqueue.h>
 #include "asic_state.h"
 #include "clock_wave.h"
+#include "noc_init.h"
 
 #include "reg_mock.h"
 
 /* Custom fake for ReadReg to simulate timer progression */
-#define RESET_UNIT_REFCLK_CNT_LO_REG_ADDR 0x800300E0
+#define RESET_UNIT_REFCLK_CNT_LO_REG_ADDR         0x800300E0
 #define PLL_CNTL_WRAPPER_CLOCK_WAVE_CNTL_REG_ADDR 0x80020038
 static uint32_t timer_counter;
 static uint8_t i2c_read_buf_emul[256] = {0};
@@ -24,6 +27,7 @@ static uint8_t i2c_write_buf_emul[256] = {0};
 static uint8_t i2c_write_buf_idx;
 
 static uint32_t clock_wave_value;
+static uint32_t noc_2_axi_last_write;
 
 static uint32_t ReadReg_msgqueue_fake(uint32_t addr)
 {
@@ -43,6 +47,12 @@ static uint32_t ReadReg_msgqueue_fake(uint32_t addr)
 	if (addr == RESET_UNIT_REFCLK_CNT_LO_REG_ADDR) {
 		return timer_counter++;
 	}
+
+	/*BH_PCIE_DWC_PCIE_USP_PF0_MSI_CAP_PCI_MSI_CAP_ID_NEXT_CTRL_REG_REG_ADDR*/
+	if (addr == 0xCE000050) {
+		return BIT(16) | BIT(20); /*pci_msi_enable | pci_msi_multiple_msg_en == 1*/
+	}
+
 	return 0;
 }
 
@@ -58,6 +68,10 @@ static void WriteReg_msgqueue_fake(uint32_t addr, uint32_t value)
 
 	if (addr == PLL_CNTL_WRAPPER_CLOCK_WAVE_CNTL_REG_ADDR) {
 		clock_wave_value = value;
+	}
+
+	if (addr == 0xC0000000) {
+		noc_2_axi_last_write = value;
 	}
 }
 
@@ -85,20 +99,36 @@ ZTEST(msgqueue, test_msgqueue_register_handler)
 
 ZTEST(msgqueue, test_msgqueue_power_settings_cmd)
 {
+	const struct device *pll4 = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(pll4));
 	union request req = {0};
 	struct response rsp = {0};
 
 	/* LSB to MSB:
 	 * 0x21: TT_SMC_MSG_POWER_SETTING
-	 * 0x03: 3 power flags valid, 0 power settings valid
-	 * 0x0003: max_ai_clk on, mrisc power on, tensix power off
+	 * 0x04: 4 power flags valid, 0 power settings valid
+	 * 0x0003: max_ai_clk on, mrisc power on, tensix power off, l2cpu off
 	 */
-	req.data[0] = 0x00030321;
+	req.data[0] = 0x00030421;
 	msgqueue_request_push(0, &req);
 	process_message_queues();
 	msgqueue_response_pop(0, &rsp);
 
 	zassert_equal(rsp.data[0], 0x0);
+
+	/* Validate that status of emulated L2CPUCLKs are disabled */
+	zassert_true(device_is_ready(pll4));
+	zassert_equal(clock_control_get_status(
+			      pll4, (clock_control_subsys_t)CLOCK_CONTROL_TT_BH_CLOCK_L2CPUCLK_0),
+		      CLOCK_CONTROL_STATUS_OFF);
+	zassert_equal(clock_control_get_status(
+			      pll4, (clock_control_subsys_t)CLOCK_CONTROL_TT_BH_CLOCK_L2CPUCLK_1),
+		      CLOCK_CONTROL_STATUS_OFF);
+	zassert_equal(clock_control_get_status(
+			      pll4, (clock_control_subsys_t)CLOCK_CONTROL_TT_BH_CLOCK_L2CPUCLK_2),
+		      CLOCK_CONTROL_STATUS_OFF);
+	zassert_equal(clock_control_get_status(
+			      pll4, (clock_control_subsys_t)CLOCK_CONTROL_TT_BH_CLOCK_L2CPUCLK_3),
+		      CLOCK_CONTROL_STATUS_OFF);
 }
 
 ZTEST(msgqueue, test_msg_type_set_voltage)
@@ -188,6 +218,32 @@ ZTEST(msgqueue, test_msg_type_switch_clk_scheme)
 	zassert_equal(clock_wave_value, 1U);
 }
 
+ZTEST(msgqueue, test_msg_type_debug_noc_translation)
+{
+	union request req = {0};
+	struct response rsp = {0};
+
+	req.data[0] = TT_SMC_MSG_DEBUG_NOC_TRANSLATION | (BIT(0) << 8U) /* Enable translation*/
+		      | (BIT(1) << 8U)                                  /* PCIE Instance  = 1*/
+		      | (BIT(2) << 8U)                                  /*PCIE instance override*/
+		      | ((BIT(0) | BIT(3)) << 16U) /*Bad tensix columns 0 and 3*/
+		;
+	req.data[1] = 8U /* Bad GDDR 8 */ | ((BIT(1) | BIT(3)) << 8U) /*skip eth 1 and 3*/;
+	msgqueue_request_push(0, &req);
+	process_message_queues();
+	msgqueue_response_pop(0, &rsp);
+
+	zassert_equal(rsp.data[0], 234); /* uin8_t EINVAL -> GDDR out of range*/
+
+	req.data[1] = NO_BAD_GDDR | ((BIT(1) | BIT(3)) << 8U) /*skip eth 1 and 3*/;
+
+	msgqueue_request_push(0, &req);
+	process_message_queues();
+	msgqueue_response_pop(0, &rsp);
+
+	zassert_equal(rsp.data[0], 0); /*OK*/
+}
+
 static void test_setup(void *ctx)
 {
 	(void)ctx;
@@ -199,6 +255,31 @@ static void test_setup(void *ctx)
 	clock_wave_value = 0U;
 	memset(i2c_read_buf_emul, 0, sizeof(i2c_read_buf_emul));
 	memset(i2c_write_buf_emul, 0, sizeof(i2c_write_buf_emul));
+}
+
+ZTEST(msgqueue, test_msg_type_send_pcie_msi)
+{
+	union request req = {0};
+	struct response rsp = {0};
+
+	noc_2_axi_last_write = 0xffffffffU;
+	req.data[0] = TT_SMC_MSG_SEND_PCIE_MSI | (BIT(0) << 8U) /*PCIe instance 1*/;
+	req.data[1] = 0x00; /* MSI number */
+	msgqueue_request_push(0, &req);
+	process_message_queues();
+	msgqueue_response_pop(0, &rsp);
+
+	zexpect_equal(rsp.data[0], 0);
+	zexpect_equal(noc_2_axi_last_write, 0);
+
+	req.data[1] = 0x01; /* MSI number */
+
+	msgqueue_request_push(0, &req);
+	process_message_queues();
+	msgqueue_response_pop(0, &rsp);
+
+	zexpect_equal(rsp.data[0], 0);
+	zexpect_equal(noc_2_axi_last_write, 1);
 }
 
 ZTEST_SUITE(msgqueue, NULL, NULL, test_setup, NULL, NULL);

@@ -1,10 +1,14 @@
-/
-{
-fwtable: fwtable
-	{
+/ {
+	fwtable: fwtable {
 		compatible = "tenstorrent,bh-fwtable";
 		status = "okay";
 		flash-dev = <&flashcontroller0>;
+	};
+
+pll4: pll4
+	{
+		compatible = "tenstorrent,clock-control-emul";
+		status = "okay";
 	};
 };
 

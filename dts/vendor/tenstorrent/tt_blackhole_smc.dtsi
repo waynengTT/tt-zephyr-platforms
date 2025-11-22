@@ -1,0 +1,748 @@
+/*
+ * Copyright (c) 2024 Tenstorrent AI ULC
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+#include "skeleton.dtsi"
+
+#include <zephyr/dt-bindings/i2c/i2c.h>
+
+/ {
+	aliases {
+		uart-0 = &uart0;
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		cpu@0 {
+			device_type = "cpu";
+			compatible = "snps,archs4xd";
+			reg = <0>;
+		};
+
+		cpu@1 {
+			device_type = "cpu";
+			compatible = "snps,archs4xd";
+			reg = <1>;
+		};
+
+		cpu@2 {
+			device_type = "cpu";
+			compatible = "snps,archs4xd";
+			reg = <2>;
+		};
+
+		cpu@3 {
+			device_type = "cpu";
+			compatible = "snps,archs4xd";
+			reg = <3>;
+		};
+	};
+
+	vuarts {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		vuart0: uart_tt_virt@0 {
+			compatible = "tenstorrent,vuart";
+			version = <0x00000000>;
+			reg = <0x0>;
+			status = "disabled";
+		};
+
+		vuart1: uart_tt_virt@1 {
+			compatible = "tenstorrent,vuart";
+			version = <0x00000000>;
+			reg = <0x1>;
+			status = "disabled";
+		};
+
+		vuart2: uart_tt_virt@2 {
+			compatible = "tenstorrent,vuart";
+			version = <0x00000000>;
+			reg = <0x2>;
+			status = "disabled";
+		};
+
+		vuart3: uart_tt_virt@3 {
+			compatible = "tenstorrent,vuart";
+			version = <0x00000000>;
+			reg = <0x3>;
+			status = "disabled";
+		};
+
+		vuart4: uart_tt_virt@4 {
+			compatible = "tenstorrent,vuart";
+			version = <0x00000000>;
+			reg = <0x4>;
+			status = "disabled";
+		};
+
+		vuart5: uart_tt_virt@5 {
+			compatible = "tenstorrent,vuart";
+			version = <0x00000000>;
+			reg = <0x5>;
+			status = "disabled";
+		};
+
+		vuart6: uart_tt_virt@6 {
+			compatible = "tenstorrent,vuart";
+			version = <0x00000000>;
+			reg = <0x6>;
+			status = "disabled";
+		};
+
+		vuart7: uart_tt_virt@7 {
+			compatible = "tenstorrent,vuart";
+			version = <0x00000000>;
+			reg = <0x7>;
+			status = "disabled";
+		};
+
+		vuart8: uart_tt_virt@8 {
+			compatible = "tenstorrent,vuart";
+			version = <0x00000000>;
+			reg = <0x8>;
+			status = "disabled";
+		};
+
+		vuart9: uart_tt_virt@9 {
+			compatible = "tenstorrent,vuart";
+			version = <0x00000000>;
+			reg = <0x9>;
+			status = "disabled";
+		};
+
+		vuart10: uart_tt_virt@a {
+			compatible = "tenstorrent,vuart";
+			version = <0x00000000>;
+			reg = <0xa>;
+			status = "disabled";
+		};
+
+		vuart11: uart_tt_virt@b {
+			compatible = "tenstorrent,vuart";
+			version = <0x00000000>;
+			reg = <0xb>;
+			status = "disabled";
+		};
+
+		vuart12: uart_tt_virt@c {
+			compatible = "tenstorrent,vuart";
+			version = <0x00000000>;
+			reg = <0xc>;
+			status = "disabled";
+		};
+
+		vuart13: uart_tt_virt@d {
+			compatible = "tenstorrent,vuart";
+			version = <0x00000000>;
+			reg = <0xd>;
+			status = "disabled";
+		};
+
+		vuart14: uart_tt_virt@e {
+			compatible = "tenstorrent,vuart";
+			version = <0x00000000>;
+			reg = <0xe>;
+			status = "disabled";
+		};
+
+		vuart15: uart_tt_virt@f {
+			compatible = "tenstorrent,vuart";
+			version = <0x00000000>;
+			reg = <0xf>;
+			status = "disabled";
+		};
+	};
+
+	gpio0: gpio@800301a0 {
+		compatible = "tenstorrent,bh-gpio";
+		reg = <0x800301a0 0x4>,
+		      <0x800301ac 0x4>,
+		      <0x800301b4 0x4>;
+		reg-names = "trien",
+			    "rxen",
+			    "data";
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <16>;
+	};
+
+	gpio1: gpio@80030240 {
+		compatible = "tenstorrent,bh-gpio";
+		reg = <0x80030240 0x4>,
+		      <0x8003025c 0x4>,
+		      <0x80030254 0x4>;
+		reg-names = "trien",
+			    "rxen",
+			    "data";
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <16>;
+	};
+
+	gpio2: gpio@80030580 {
+		compatible = "tenstorrent,bh-gpio";
+		reg = <0x80030580 0x4>,
+		      <0x8003058c 0x4>,
+		      <0x80030594 0x4>;
+		reg-names = "trien",
+			    "rxen",
+			    "data";
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <16>;
+	};
+
+	gpio3: gpio@800305a0 {
+		compatible = "tenstorrent,bh-gpio";
+		reg = <0x800305a0 0x4>,
+		      <0x800305ac 0x4>,
+		      <0x800305b4 0x4>;
+		reg-names = "trien",
+			    "rxen",
+			    "data";
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <16>;
+	};
+
+	ref_clk: ref_clk {
+		compatible = "fixed-clock";
+
+		clock-frequency = <50>;
+		#clock-cells = <0>;
+	};
+
+	pll0: pll@80020100 {
+		compatible = "tenstorrent,bh-clock-control";
+
+		reg = <0x80020100 0x100>;
+		clocks = <&ref_clk>;
+		#clock-cells = <0>;
+
+		refdiv = <2>;
+		postdiv = <1>;
+		fbdiv = <128>;
+		ctrl_bus1 = <0x18>;
+		ctrl_bus5 = <1>;
+		post_divs = <3 0 0 0>;
+		use_post_divs = <1 1 1 1>;
+		status = "disabled";
+	};
+
+	pll1: pll@80020200 {
+		compatible = "tenstorrent,bh-clock-control";
+
+		reg = <0x80020200 0x100>;
+		clocks = <&ref_clk>;
+		#clock-cells = <0>;
+
+		refdiv = <2>;
+		postdiv = <1>;
+		fbdiv = <192>;
+		ctrl_bus1 = <0x18>;
+		ctrl_bus5 = <1>;
+		post_divs = <5 4 23 0>;
+		use_post_divs = <1 1 1 1>;
+		status = "disabled";
+	};
+
+	pll2: pll@80020300 {
+		compatible = "tenstorrent,bh-clock-control";
+
+		reg = <0x80020300 0x100>;
+		clocks = <&ref_clk>;
+		#clock-cells = <0>;
+
+		refdiv = <2>;
+		postdiv = <1>;
+		fbdiv = <68>;
+		ctrl_bus1 = <0x18>;
+		ctrl_bus5 = <1>;
+		post_divs = <1 0 0 0>;
+		use_post_divs = <1 1 1 1>;
+		status = "disabled";
+	};
+
+	pll3: pll@80020400 {
+		compatible = "tenstorrent,bh-clock-control";
+
+		reg = <0x80020400 0x100>;
+		clocks = <&ref_clk>;
+		#clock-cells = <0>;
+
+		refdiv = <2>;
+		postdiv = <1>;
+		fbdiv = <120>;
+		ctrl_bus1 = <0x18>;
+		ctrl_bus5 = <1>;
+		post_divs = <3 0 0 0>;
+		use_post_divs = <1 1 1 1>;
+		status = "disabled";
+	};
+
+	pll4: pll@80020500 {
+		compatible = "tenstorrent,bh-clock-control";
+
+		reg = <0x80020500 0x100>;
+		clocks = <&ref_clk>;
+		#clock-cells = <0>;
+
+		refdiv = <2>;
+		postdiv = <1>;
+		fbdiv = <64>;
+		ctrl_bus1 = <0x18>;
+		ctrl_bus5 = <1>;
+		post_divs = <1 1 1 1>;
+		use_post_divs = <1 1 1 1>;
+		status = "disabled";
+	};
+
+	pvt: pvt@80030700 {
+		compatible = "tenstorrent,bh-pvt";
+		reg = <0x80030700 0x4>;
+		num_pd = <16>;
+		num_vm = <8>;
+		num_ts = <8>;
+		status = "disabled";
+	};
+
+	dma1: noc_dma@ffb20000 {
+		compatible = "tenstorrent,noc-dma";
+		reg = <0xffb20000 0x20c>;
+
+		#dma-cells = <1>;
+		dma-channels = <4>;
+		dma-buf-addr-alignment = <64>;
+	};
+
+	sysclk: system-clock {
+		compatible = "fixed-clock";
+		clock-frequency = <500000000>;
+		#clock-cells = <0>;
+	};
+
+	intc: arcv2-intc {
+		compatible = "snps,arcv2-intc";
+		interrupt-controller;
+		#interrupt-cells = <2>;
+	};
+
+	idu_intc: idu-interrupt-controller {
+		compatible = "snps,archs-idu-intc";
+		interrupt-controller;
+		#interrupt-cells = <2>;
+		interrupt-parent = <&intc>;
+	};
+
+	ictl0: ictl@800c0000 {
+		compatible = "snps,designware-intc";
+		reg = <0x800c0000 0x1000>;
+		interrupt-parent = <&intc>;
+		interrupts = <33 1>;
+		interrupt-controller;
+		#interrupt-cells = <3>;
+		num-irqs = <34>;
+	};
+
+	ictl1: ictl@800d0000 {
+		compatible = "snps,designware-intc";
+		reg = <0x800d0000 0x1000>;
+		interrupt-parent = <&intc>;
+		interrupts = <34 1>;
+		interrupt-controller;
+		#interrupt-cells = <3>;
+		num-irqs = <22>;
+	};
+
+	ictl2: ictl@800e0000 {
+		compatible = "snps,designware-intc";
+		reg = <0x800e0000 0x1000>;
+		interrupt-parent = <&intc>;
+		interrupts = <35 1>;
+		interrupt-controller;
+		#interrupt-cells = <3>;
+		num-irqs = <64>;
+	};
+
+	ictl3: ictl@800f0000 {
+		compatible = "snps,designware-intc";
+		reg = <0x800f0000 0x1000>;
+		interrupt-parent = <&intc>;
+		interrupts = <36 0>;
+		interrupt-controller;
+		#interrupt-cells = <3>;
+		num-irqs = <64>;
+	};
+
+	ici: intercore-interrupt-unit {
+		compatible = "snps,archs-ici";
+		interrupts = <19 2>;
+		interrupt-parent = <&intc>;
+	};
+
+	pinctrl: pinctrl {
+		compatible = "tenstorrent,bh-pinctrl";
+		status = "disabled";
+	};
+
+	timer0: timer0 {
+		compatible = "snps,arc-timer";
+		interrupts = <16 2>;
+		interrupt-parent = <&intc>;
+	};
+
+	timer1: timer1 {
+		compatible = "snps,arc-timer";
+		interrupts = <17 2>;
+		interrupt-parent = <&intc>;
+	};
+
+	wdt0: wdt0 {
+		compatible = "tenstorrent,bh-watchdog";
+		status = "disabled";
+	};
+
+	eth0: bh_eth0 {
+		compatible = "tenstorrent,bh-eth";
+		status = "disabled";
+	};
+
+	eth1: bh_eth1 {
+		compatible = "tenstorrent,bh-eth";
+		status = "disabled";
+	};
+
+	eth2: bh_eth2 {
+		compatible = "tenstorrent,bh-eth";
+		status = "disabled";
+	};
+
+	eth3: bh_eth3 {
+		compatible = "tenstorrent,bh-eth";
+		status = "disabled";
+	};
+
+	eth4: bh_eth4 {
+		compatible = "tenstorrent,bh-eth";
+		status = "disabled";
+	};
+
+	eth5: bh_eth5 {
+		compatible = "tenstorrent,bh-eth";
+		status = "disabled";
+	};
+
+	eth6: bh_eth6 {
+		compatible = "tenstorrent,bh-eth";
+		status = "disabled";
+	};
+
+	eth7: bh_eth7 {
+		compatible = "tenstorrent,bh-eth";
+		status = "disabled";
+	};
+
+	eth8: bh_eth8 {
+		compatible = "tenstorrent,bh-eth";
+		status = "disabled";
+	};
+
+	eth9: bh_eth9 {
+		compatible = "tenstorrent,bh-eth";
+		status = "disabled";
+	};
+
+	eth10: bh_eth10 {
+		compatible = "tenstorrent,bh-eth";
+		status = "disabled";
+	};
+
+	eth11: bh_eth11 {
+		compatible = "tenstorrent,bh-eth";
+		status = "disabled";
+	};
+
+	eth12: bh_eth12 {
+		compatible = "tenstorrent,bh-eth";
+		status = "disabled";
+	};
+
+	eth13: bh_eth13 {
+		compatible = "tenstorrent,bh-eth";
+		status = "disabled";
+	};
+
+	memc0: bh_memc0 {
+		compatible = "tenstorrent,bh-memc";
+		status = "disabled";
+	};
+
+	memc1: bh_memc1 {
+		compatible = "tenstorrent,bh-memc";
+		status = "disabled";
+	};
+
+	memc2: bh_memc2 {
+		compatible = "tenstorrent,bh-memc";
+		status = "disabled";
+	};
+
+	memc3: bh_memc3 {
+		compatible = "tenstorrent,bh-memc";
+		status = "disabled";
+	};
+
+	memc4: bh_memc4 {
+		compatible = "tenstorrent,bh-memc";
+		status = "disabled";
+	};
+
+	memc5: bh_memc5 {
+		compatible = "tenstorrent,bh-memc";
+		status = "disabled";
+	};
+
+	memc6: bh_memc6 {
+		compatible = "tenstorrent,bh-memc";
+		status = "disabled";
+	};
+
+	memc7: bh_memc7 {
+		compatible = "tenstorrent,bh-memc";
+		status = "disabled";
+	};
+
+	noc0: bh_noc0 {
+		compatible = "tenstorrent,noc";
+		status = "disabled";
+	};
+
+	noc1: bh_noc1 {
+		compatible = "tenstorrent,noc";
+		status = "disabled";
+	};
+
+	fwtable: fwtable {
+		compatible = "tenstorrent,bh-fwtable";
+		status = "disabled";
+	};
+
+	dmas {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "simple-bus";
+
+		dma0: dma@0 {
+			compatible = "snps,designware-dma-arc-hs";
+			reg = <0>;
+			#dma-cells = <1>;
+			dma-channels = <4>;
+			status = "disabled";
+		};
+	};
+
+	soc {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		compatible = "simple-bus";
+		interrupt-parent = <&idu_intc>;
+		ranges;
+
+		global_reset: reset@80030000 {
+			compatible = "tenstorrent,bh-reset";
+			reg = <0x80030000 0x4>;
+			#reset-cells = <1>;
+			reset-mask = <0x2383>;
+			status = "okay";
+		};
+
+		pcie_reset: reset@80030004 {
+			compatible = "tenstorrent,bh-reset";
+			reg = <0x80030004 0x4>;
+			#reset-cells = <1>;
+			nresets = <4>;
+			status = "okay";
+		};
+
+		eth_reset: reset@80030008 {
+			compatible = "tenstorrent,bh-reset";
+			reg = <0x80030008 0x4>;
+			#reset-cells = <1>;
+			nresets = <14>;
+			status = "okay";
+		};
+
+		ddr_reset: reset@80030010 {
+			compatible = "tenstorrent,bh-reset";
+			reg = <0x80030010 0x4>;
+			#reset-cells = <1>;
+			nresets = <8>;
+			status = "okay";
+		};
+
+		l2cpu_reset: reset@80030014 {
+			compatible = "tenstorrent,bh-reset";
+			reg = <0x80030014 0x4>;
+			#reset-cells = <1>;
+			nresets = <4>;
+			status = "okay";
+		};
+
+		tensix_reset0: reset@80030020 {
+			compatible = "tenstorrent,bh-reset";
+			reg = <0x80030020 0x4>;
+			#reset-cells = <1>;
+			nresets = <32>;
+			status = "okay";
+		};
+
+		tensix_reset1: reset@80030024 {
+			compatible = "tenstorrent,bh-reset";
+			reg = <0x80030024 0x4>;
+			#reset-cells = <1>;
+			nresets = <32>;
+			status = "okay";
+		};
+
+		tensix_reset2: reset@80030028 {
+			compatible = "tenstorrent,bh-reset";
+			reg = <0x80030028 0x4>;
+			#reset-cells = <1>;
+			nresets = <32>;
+			status = "okay";
+		};
+
+		tensix_reset3: reset@8003002c {
+			compatible = "tenstorrent,bh-reset";
+			reg = <0x8003002c 0x4>;
+			#reset-cells = <1>;
+			nresets = <32>;
+			status = "okay";
+		};
+
+		tensix_reset4: reset@80030030 {
+			compatible = "tenstorrent,bh-reset";
+			reg = <0x80030030 0x4>;
+			#reset-cells = <1>;
+			nresets = <32>;
+			status = "okay";
+		};
+
+		tensix_reset5: reset@80030034 {
+			compatible = "tenstorrent,bh-reset";
+			reg = <0x80030034 0x4>;
+			#reset-cells = <1>;
+			nresets = <32>;
+			status = "okay";
+		};
+
+		tensix_reset6: reset@80030038 {
+			compatible = "tenstorrent,bh-reset";
+			reg = <0x80030038 0x4>;
+			#reset-cells = <1>;
+			nresets = <32>;
+			status = "okay";
+		};
+
+		tensix_reset7: reset@8003003c {
+			compatible = "tenstorrent,bh-reset";
+			#reset-cells = <1>;
+			reg = <0x8003003c 0x4>;
+			nresets = <32>;
+			status = "okay";
+		};
+
+		uart0: uart@80200000 {
+			compatible = "ns16550";
+			clocks = <&sysclk>;
+			reg = <0x80200000 0x1000>;
+			interrupts = <59 2>;
+			reg-shift = <2>;
+			status = "disabled";
+		};
+
+		// Each core has 4kB of ICCM @ 0.
+		iccm0: iccm@0 {
+			compatible = "arc,iccm";
+			reg = <0x0 0x1000>;
+		};
+
+		// CSM is 512kB @ 0x1000_0000
+		csm: memory@10000000 {
+			compatible = "zephyr,memory-region", "mmio-sram";
+			zephyr,memory-region = "CSM";
+			device_type = "memory";
+			reg = <0x10000000 0x80000>;
+		};
+
+		i2c0: i2c@80060000 {
+			compatible = "snps,designware-i2c";
+			clock-frequency = <I2C_BITRATE_FAST>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x80060000 0x1000>;
+			interrupts = <0 1 0>, <1 1 0>, <2 1 0>, <3 1 0>, <4 1 0>, <5 1 0>,
+				     <6 1 0>, <7 1 0>, <8 1 0>, <9 1 0>, <10 1 0>, <11 1 0>,
+				     <12 1 0>, <13 1 0>, <14 1 0>, <15 1 0>, <16 1 0>, <17 1 0>,
+				     <18 1 0>, <19 1 0>, <20 1 0>, <21 1 0>, <22 1 0>, <23 1 0>;
+			interrupt-parent = <&ictl2>;
+			status = "okay";
+		};
+
+		i2c1: i2c@80090000 {
+			compatible = "snps,designware-i2c";
+			clock-frequency = <I2C_BITRATE_FAST>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x80090000 0x1000>;
+			interrupts = <24 1 0>, <25 1 0>, <26 1 0>, <27 1 0>, <28 1 0>, <29 1 0>,
+				     <30 1 0>, <31 1 0>, <32 1 0>, <33 1 0>, <34 1 0>, <35 1 0>,
+				     <36 1 0>, <37 1 0>, <38 1 0>, <39 1 0>, <40 1 0>, <41 1 0>,
+				     <42 1 0>, <43 1 0>, <44 1 0>, <45 1 0>, <46 1 0>, <47 1 0>;
+			interrupt-parent = <&ictl2>;
+			status = "okay";
+		};
+
+		i2c2: i2c@800a0000 {
+			compatible = "snps,designware-i2c";
+			clock-frequency = <I2C_BITRATE_FAST>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x800a0000 0x1000>;
+			interrupts = <0 1 0>, <1 1 0>, <2 1 0>, <3 1 0>, <4 1 0>, <5 1 0>,
+				     <6 1 0>, <7 1 0>, <8 1 0>, <9 1 0>, <10 1 0>, <11 1 0>,
+				     <12 1 0>, <13 1 0>, <14 1 0>, <15 1 0>, <16 1 0>, <17 1 0>,
+				     <18 1 0>, <19 1 0>, <20 1 0>, <21 1 0>, <22 1 0>, <23 1 0>;
+			interrupt-parent = <&ictl3>;
+			status = "disabled";
+		};
+
+		spi0: spi@80070000 {
+			compatible = "snps,designware-ssi",
+				     "snps,designware-ssi-v2";
+			#address-cells = <1>;
+			#size-cells = <0>;
+			reg = <0x80070000 0x1000>;
+			interrupts = <26 1 0>, <24 1 0>, <29 1 0>;
+			interrupt-parent = <&ictl3>;
+			interrupt-names = "rx_avail", "tx_req", "err_int";
+			fifo-depth = <15>;
+			rx-fifo-depth = <255>;
+			clocks = <&sysclk>;
+			packet-data-limit = <65536>;
+			op-mode = "MSPI_OP_MODE_CONTROLLER";
+		};
+
+		cdt0: cdt@80300000 {
+			compatible = "tenstorrent,bh-chip-debug-trace";
+			reg = <0x80300000 0x100>;
+			status = "disabled";
+		};
+	};
+};

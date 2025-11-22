@@ -38,9 +38,14 @@ except ImportError:
     class TwisterHarnessTimeoutException(Exception):
         pass
 
+    class DeviceConfig:
+        def __init__(self, fwbundle=None):
+            self.app_build_dir = Path(fwbundle).parent / "smc"
+
     class DeviceAdapter:
         def __init__(self, fwbundle=None):
             self.fwbundle = fwbundle
+            self.device_config = DeviceConfig(fwbundle)
 
         def launch(self):
             result = subprocess.run(
@@ -79,17 +84,24 @@ ARC_HANG_PC_REG_ADDR = 0x80030454
 TELEMETRY_DATA_REG_ADDR = 0x80030430
 
 # ARC messages
-ARC_MSG_TYPE_REINIT_TENSIX = 0x20
-ARC_MSG_TYPE_FORCE_AICLK = 0x33
-ARC_MSG_TYPE_GET_AICLK = 0x34
-ARC_MSG_TYPE_TEST = 0x90
-ARC_MSG_TYPE_TOGGLE_TENSIX_RESET = 0xAF
-ARC_MSG_TYPE_PING_DM = 0xC0
-ARC_MSG_TYPE_SET_WDT = 0xC1
+TT_SMC_MSG_REINIT_TENSIX = 0x20
+TT_SMC_MSG_FORCE_AICLK = 0x33
+TT_SMC_MSG_GET_AICLK = 0x34
+TT_SMC_MSG_TEST = 0x90
+TT_SMC_MSG_TOGGLE_TENSIX_RESET = 0xAF
+TT_SMC_MSG_PING_DM = 0xC0
+TT_SMC_MSG_SET_WDT = 0xC1
+TT_SMC_MSG_READ_TS = 0x1B
+TT_SMC_MSG_READ_PD = 0x1C
+TT_SMC_MSG_READ_VM = 0x1D
 
 # Telemetry tags
 TAG_CM_FW_VERSION = 29
 TAG_DM_APP_FW_VERSION = 26
+
+NUM_PD = 16
+NUM_VM = 8
+NUM_TS = 8
 
 
 def read_telem(asic_id, telem_idx):
@@ -101,6 +113,15 @@ def read_telem(asic_id, telem_idx):
     del chip
 
     return telem
+
+
+def convert_telemetry_to_float(value):
+    INT32_MIN = -2147483648
+
+    if value == INT32_MIN:
+        return sys.float_info.max
+    else:
+        return value / 65536.0
 
 
 @pytest.fixture(scope="session")
@@ -183,6 +204,7 @@ def upgrade_from_version_test(
     version,
     dmfw_version_base,
     cmfw_version_base,
+    replace_bootloader=False,
 ):
     if board_name is None:
         pytest.skip("Upgrade test requires --board set, skipping upgrade test")
@@ -233,6 +255,28 @@ def upgrade_from_version_test(
         )
         assert False
 
+    if replace_bootloader:
+        # Newer firmware requires us to replace the production bootloader on the
+        # DMC with one that will accept a firmware signed using our temporary key
+        try:
+            subprocess.check_call(
+                [
+                    "west",
+                    "flash",
+                    "--skip-rebuild",
+                    "-d",
+                    str(
+                        unlaunched_dut.device_config.app_build_dir.parent
+                        / "mcuboot-bl2"
+                    ),
+                ]
+            )
+        except subprocess.CalledProcessError as e:
+            logger.error(f"west flash failed with error: {e}")
+            assert False
+        # Wait for the ARC chip to boot
+        wait_arc_boot(0, timeout=20)
+
     time.sleep(0.5)
     assert dmfw_version_base == read_telem(0, TAG_DM_APP_FW_VERSION)
     assert cmfw_version_base == read_telem(0, TAG_CM_FW_VERSION)
@@ -249,15 +293,97 @@ def upgrade_from_version_test(
     ) == read_telem(0, TAG_CM_FW_VERSION)
 
 
-def test_upgrade_from_18_10(arc_chip_dut, tmp_path: Path, board_name, unlaunched_dut):
+def pvt_comprehensive_test(arc_chip_dut, asic_id):
+    fail_count = 0
+    arc_chip = pyluwen.detect_chips()[asic_id]
+    test_sensors = [
+        (TT_SMC_MSG_READ_TS, 0),
+        (TT_SMC_MSG_READ_PD, 19),
+        (TT_SMC_MSG_READ_VM, 0),
+    ]
+
+    for msg_type, sensor_param in test_sensors:
+        response = arc_chip.arc_msg(msg_type, True, False, sensor_param, 0, 5000)
+
+        if response[0] == 0 or response[1] != 0:
+            fail_count += 1
+            logger.error(
+                f"Error {msg_type} response with sensor {sensor_param}: Expected !0,0 Actual: {response[0]},{response[1]}"
+            )
+    return fail_count
+
+
+def voltage_monitors_test(arc_chip_dut, asic_id):
+    arc_chip = pyluwen.detect_chips()[asic_id]
+    fail_count = 0
+
+    vmin = 0
+    vmax = 1
+
+    for sensor_id in range(NUM_VM):
+        response = arc_chip.arc_msg(TT_SMC_MSG_READ_VM, True, False, sensor_id, 0, 5000)
+
+        voltage = convert_telemetry_to_float(response[0])
+        if voltage < vmin or voltage > vmax or response[1] != 0:
+            fail_count += 1
+            logger.error(
+                f"Error in voltage monitor response. expect voltage {voltage} in ({vmin}..{vmax} with response 0 == {response[1]}"
+            )
+
+    return fail_count
+
+
+def process_detectors_test(arc_chip_dut, asic_id):
+    arc_chip = pyluwen.detect_chips()[asic_id]
+    fail_count = 0
+    fmin = 100
+    fmax = 240
+
+    delay_chains = [19, 20, 21]
+    for delay_chain in delay_chains:
+        for sensor_id in range(NUM_PD):
+            response = arc_chip.arc_msg(
+                TT_SMC_MSG_READ_PD, True, False, delay_chain, sensor_id, 5000
+            )
+
+            freq = convert_telemetry_to_float(response[0])
+            if freq < fmin or freq > fmax or response[1] != 0:
+                fail_count += 1
+                logger.error(
+                    f"Error in pd message response. Expect frequency {freq} in ({fmin}..{fmax}) with response 0 == {response[1]}"
+                )
+
+    return fail_count
+
+
+def temperature_sensors_test(arc_chip_dut, asic_id):
+    arc_chip = pyluwen.detect_chips()[asic_id]
+    fail_count = 0
+    tmin = 40
+    tmax = 70
+    for sensor_id in range(NUM_TS):
+        response = arc_chip.arc_msg(TT_SMC_MSG_READ_TS, True, False, sensor_id, 0, 5000)
+
+        temp = convert_telemetry_to_float(response[0])
+        if temp < tmin or temp > tmax or response[1] != 0:
+            fail_count += 1
+            logger.error(
+                f"Error in temp msg response. Expect temperature {temp} in ({tmin}..{tmax} with response 0 == {response[1]}"
+            )
+
+    return fail_count
+
+
+def test_upgrade_from_19_00(arc_chip_dut, tmp_path: Path, board_name, unlaunched_dut):
     upgrade_from_version_test(
         arc_chip_dut,
         tmp_path,
         board_name,
         unlaunched_dut,
-        "18.10.0",
-        (13 << 16),
-        (19 << 16),
+        "19.0.0",
+        (16 << 16),
+        (22 << 16),
+        replace_bootloader=True,
     )
 
 
@@ -267,7 +393,7 @@ def test_arc_msg(arc_chip_dut, asic_id):
     """
     # Send a test message. We expect response to be incremented by 1
     arc_chip = pyluwen.detect_chips()[asic_id]
-    response = arc_chip.arc_msg(ARC_MSG_TYPE_TEST, True, False, 20, 0, 1000)
+    response = arc_chip.arc_msg(TT_SMC_MSG_TEST, True, False, 20, 0, 1000)
     assert response[0] == 21, "SMC did not respond to test message"
     assert response[1] == 0, "SMC response invalid"
     logger.info('SMC ping message response "%d"', response[0])
@@ -282,7 +408,7 @@ def test_dmc_msg(arc_chip_dut, asic_id):
     """
     # Send an ARC message to ping the DMC, and validate that it is online
     arc_chip = pyluwen.detect_chips()[asic_id]
-    response = arc_chip.arc_msg(ARC_MSG_TYPE_PING_DM, True, False, 0, 0, 1000)
+    response = arc_chip.arc_msg(TT_SMC_MSG_PING_DM, True, False, 0, 0, 1000)
     assert response[0] == 1, "DMC did not respond to ping from SMC"
     assert response[1] == 0, "SMC response invalid"
     logger.info('DMC ping message response "%d"', response[0])
@@ -394,10 +520,10 @@ def arc_watchdog_test(asic_id):
     arc_chip = pyluwen.detect_chips()[asic_id]
     wdt_timeout = 1000
     # Setup ARC watchdog for a 1000ms timeout
-    arc_chip.arc_msg(ARC_MSG_TYPE_SET_WDT, True, False, wdt_timeout, 0, 1000)
+    arc_chip.arc_msg(TT_SMC_MSG_SET_WDT, True, False, wdt_timeout, 0, 1000)
     # Sleep 1500, make sure we can still ping arc
     time.sleep(1.5)
-    response = arc_chip.arc_msg(ARC_MSG_TYPE_TEST, True, False, 1, 0, 1000)
+    response = arc_chip.arc_msg(TT_SMC_MSG_TEST, True, False, 1, 0, 1000)
     if response[0] != 2:
         logger.warning("SMC did not respond to test message")
         return False
@@ -461,7 +587,7 @@ def arc_watchdog_test(asic_id):
         return False
     logger.info(f"ARC was reset, hang PC 0x{hang_pc:08X}")
     # Make sure ARC can still ping the DMC
-    response = arc_chip.arc_msg(ARC_MSG_TYPE_PING_DM, True, False, 0, 0, 1000)
+    response = arc_chip.arc_msg(TT_SMC_MSG_PING_DM, True, False, 0, 0, 1000)
     if response[0] != 1:
         logger.warning("DMC did not respond to ping after reset")
         return False
@@ -632,15 +758,15 @@ def tensix_reset_sequence(arc_chip):
     SOFT_RESET_DATA = 0x47800
 
     # Force AICLK to safe frequency
-    arc_chip.arc_msg(ARC_MSG_TYPE_FORCE_AICLK, arg0=250, arg1=0)
+    arc_chip.arc_msg(TT_SMC_MSG_FORCE_AICLK, arg0=250, arg1=0)
     # Clear RISC reset registers
     for addr in TENSIX_RISC_RESET_ADDR:
         arc_chip.axi_write32(addr, 0)
 
     # The tensix reset message
-    response = arc_chip.arc_msg(ARC_MSG_TYPE_TOGGLE_TENSIX_RESET)
+    response = arc_chip.arc_msg(TT_SMC_MSG_TOGGLE_TENSIX_RESET)
     assert response[1] == 0, "SMC response invalid to toggle tensix reset message"
-    response = arc_chip.arc_msg(ARC_MSG_TYPE_REINIT_TENSIX)
+    response = arc_chip.arc_msg(TT_SMC_MSG_REINIT_TENSIX)
     assert response[1] == 0, "SMC response invalid to reinit tensix message"
 
     # Set soft reset registers inside Tensix
@@ -651,7 +777,7 @@ def tensix_reset_sequence(arc_chip):
         arc_chip.axi_write32(addr, 0xFFFFFFFF)
 
     # Unforce AICLK
-    arc_chip.arc_msg(ARC_MSG_TYPE_FORCE_AICLK, arg0=0, arg1=0)
+    arc_chip.arc_msg(TT_SMC_MSG_FORCE_AICLK, arg0=0, arg1=0)
 
 
 def test_tensix_reset(arc_chip_dut, asic_id):
@@ -697,10 +823,10 @@ def test_aiclk(arc_chip_dut, asic_id):
     ]
 
     for clk in TARGET_AICLKS:
-        arc_chip.arc_msg(ARC_MSG_TYPE_FORCE_AICLK, True, False, clk, 0, 1000)
+        arc_chip.arc_msg(TT_SMC_MSG_FORCE_AICLK, True, False, clk, 0, 1000)
         # Delay to allow AICLK to settle
         time.sleep(0.1)
-        aiclk = arc_chip.arc_msg(ARC_MSG_TYPE_GET_AICLK)[0]
+        aiclk = arc_chip.arc_msg(TT_SMC_MSG_GET_AICLK)[0]
         assert aiclk == clk, f"Failed to set clock to {clk} MHz"
         logger.info(f"AICLK set to {aiclk} MHz successfully")
 
@@ -757,3 +883,43 @@ def test_mcuboot(unlaunched_dut, asic_id):
     buf = bytes(4)
     arc_chip.as_bh().spi_read(MCUBOOT_HEADER_ADDR, buf)
     magic = int.from_bytes(buf, "little")
+
+
+def test_temperature_sensors(arc_chip_dut, asic_id):
+    """
+    Validates that the temperature sensor messages work and relay responses within reasonable bounds
+
+    The message tested is READ_TS.
+    The expectation is that the temperature returned is between 40 and 70
+    """
+    assert 0 == temperature_sensors_test(arc_chip_dut, asic_id)
+
+
+def test_process_detectors(arc_chip_dut, asic_id):
+    """
+    Validates that the voltage monitor messages work and relay responses within reasonable bounds
+
+    The message tested is READ_PD.
+    The expectation is that the frequency returned is between 100 and 240
+    """
+    assert 0 == process_detectors_test(arc_chip_dut, asic_id), "test_pvt_msgs failed"
+
+
+def test_voltage_monitors(arc_chip_dut, asic_id):
+    """
+    Validates that the voltage monitor messages work and relay responses within reasonable bounds
+
+    The message tested is READ_VM.
+    The expectation is that the voltage returned is between 0 and 1.
+    """
+    assert 0 == voltage_monitors_test(arc_chip_dut, asic_id), "test_pvt_msgs failed"
+
+
+def test_pvt_comprehensive(arc_chip_dut, asic_id):
+    """
+    Validates that the PVT messages work and relay responses within reasonable bounds
+
+    The messages tested are READ_TS, READ_PD, and READ_VM.
+    The expectation is that the SMC response to these messages is 0.
+    """
+    assert 0 == pvt_comprehensive_test(arc_chip_dut, asic_id), "test_pvt_msgs failed"

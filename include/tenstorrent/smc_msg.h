@@ -37,8 +37,12 @@ enum tt_smc_msg {
 
 	/** @brief @ref switch_clk_scheme_rqst "Switch clock scheme request" */
 	TT_SMC_MSG_SWITCH_CLK_SCHEME = 0x14,
+
+	/** @brief @ref debug_noc_translation_rqst "Debug NOC translation request" */
 	TT_SMC_MSG_DEBUG_NOC_TRANSLATION = 0x15,
 	TT_SMC_MSG_REPORT_SCRATCH_ONLY = 0x16,
+
+	/** @brief @ref send_pcie_msi_rqst "Send PCIe MSI request" */
 	TT_SMC_MSG_SEND_PCIE_MSI = 0x17,
 
 	/** @brief @ref switch_vout_control_rqst "Switch VOUT control request" */
@@ -115,6 +119,7 @@ enum tt_smc_msg {
 	TT_SMC_MSG_SET_LAST_SERIAL = 0xBE,
 	/** @brief eFuse burn request (not supported) */
 	TT_SMC_MSG_EFUSE_BURN = 0xBF,
+	/** @brief Ping DMC request */
 	TT_SMC_MSG_PING_DM = 0xC0,
 	TT_SMC_MSG_SET_WDT_TIMEOUT = 0xC1,
 	/** @brief Flash write unlock request */
