@@ -9,6 +9,7 @@
 #include "irqnum.h"
 #include "noc2axi.h"
 #include "pcie.h"
+#include "pcie_ltssm_logger.h"
 #include "pciesd.h"
 #include "reg.h"
 #include "status_reg.h"
@@ -57,6 +58,13 @@
 #define PCIE_SII_A_LTSSM_STATE_REG_OFFSET      0x00000128
 
 LOG_MODULE_DECLARE(bh_arc);
+
+/* PCIe Link Status Register - offset in PCIe capability structure
+ * Typically at 0x82 in the capability (base usually 0x70 or 0x80)
+ * For Synopsys DesignWare PCIe controller, this is usually at 0x80 + 0x12 = 0x92
+ */
+#define PCIE_LINK_STATUS_REG_OFFSET                  0x00000092
+#define PCIE_LINK_SPEED_MASK                         0x0000000F
 
 static const struct device *const fwtable_dev = DEVICE_DT_GET(DT_NODELABEL(fwtable));
 static const struct device *const arc_dma_dev = DEVICE_DT_GET_OR_NULL(DT_NODELABEL(dma0));
@@ -177,6 +185,20 @@ bool ArcDmaTransfer(const void *src, void *dst, uint32_t len)
 		return false;
 	}
 	return dma_arc_hs_transfer(arc_dma_dev, 0, src, dst, len, K_MSEC(500)) == 0;
+}
+
+static inline uint8_t GetCurrentLinkSpeed(void)
+{
+	/* Read Link Status Register to get current negotiated speed
+	 * Bits [3:0] contain the link speed:
+	 * 0x1 = Gen1 (2.5 GT/s)
+	 * 0x2 = Gen2 (5.0 GT/s)
+	 * 0x3 = Gen3 (8.0 GT/s)
+	 * 0x4 = Gen4 (16.0 GT/s)
+	 * 0x5 = Gen5 (32.0 GT/s)
+	 */
+	uint32_t link_status = ReadDbiReg(PCIE_LINK_STATUS_REG_OFFSET);
+	return (uint8_t)(link_status & PCIE_LINK_SPEED_MASK);
 }
 
 static inline void SetupDbiAccess(void)
@@ -400,18 +422,41 @@ static void TogglePerst(void)
 
 static PCIeInitStatus PollForLinkUp(uint8_t pcie_inst)
 {
-	ARG_UNUSED(pcie_inst);
+	/* Initialize LTSSM logger for this PCIe instance */
+	ltssm_logger_init(pcie_inst);
 
-	/* timeout after 200 ms */
+	/* timeout after 500 ms */
 	uint64_t end_time = TimerTimestamp() + 500 * WAIT_1MS;
 	bool training_done = false;
+	uint8_t last_logged_state = LTSSM_UNKNOWN;
 
 	do {
 		PCIE_SII_LTSSM_STATE_reg_u ltssm_state;
 
 		ltssm_state.val = ReadSiiReg(PCIE_SII_A_LTSSM_STATE_REG_OFFSET);
+		
+		/* Log state transition if changed */
+		uint8_t current_state = ltssm_state.f.smlh_ltssm_state_sync;
+		if (current_state != last_logged_state) {
+			uint8_t link_speed = GetCurrentLinkSpeed();
+			ltssm_logger_log(pcie_inst, current_state, 
+					 ltssm_state.f.smlh_link_up_sync,
+					 ltssm_state.f.rdlh_link_up_sync,
+					 link_speed);
+			last_logged_state = current_state;
+		}
+
 		training_done = ltssm_state.f.smlh_link_up_sync && ltssm_state.f.rdlh_link_up_sync;
 	} while (!training_done && TimerTimestamp() < end_time);
+
+	/* Log final state */
+	PCIE_SII_LTSSM_STATE_reg_u final_state;
+	final_state.val = ReadSiiReg(PCIE_SII_A_LTSSM_STATE_REG_OFFSET);
+	uint8_t final_link_speed = GetCurrentLinkSpeed();
+	ltssm_logger_log(pcie_inst, final_state.f.smlh_ltssm_state_sync,
+			 final_state.f.smlh_link_up_sync,
+			 final_state.f.rdlh_link_up_sync,
+			 final_link_speed);
 
 	if (!training_done) {
 		return PCIeLinkTrainTimeout;
@@ -461,6 +506,11 @@ static int pcie_init(void)
 	}
 
 	const ReadOnly *rotable = tt_bh_fwtable_get_read_only_table(fwtable_dev);
+
+	/* Initialize LTSSM loggers for both instances early */
+	ltssm_logger_init(0);
+	ltssm_logger_init(1);
+
 	FwTable_PciPropertyTable pci0_property_table;
 	FwTable_PciPropertyTable pci1_property_table;
 	struct CntlInitV2Param param;

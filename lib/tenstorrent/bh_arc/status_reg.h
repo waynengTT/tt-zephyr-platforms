@@ -66,6 +66,8 @@
 #define I2C0_TARGET_DEBUG_STATE_REG_ADDR     RESET_UNIT_SCRATCH_RAM_REG_ADDR(19)
 #define I2C0_TARGET_DEBUG_STATE_2_REG_ADDR   RESET_UNIT_SCRATCH_RAM_REG_ADDR(20)
 #define ARC_HANG_PC                          RESET_UNIT_SCRATCH_RAM_REG_ADDR(21)
+/* SCRATCH_RAM_22 - SCRATCH_RAM_62: Available for future use */
+/* Note: PCIe LTSSM Logger moved to CSM (0x10000000) for 64-entry buffers */
 
 #define STATUS_FW_VUART_REG_ADDR(n) RESET_UNIT_SCRATCH_RAM_REG_ADDR(40 + (n))
 /* SCRATCH_RAM_40 - SCRATCH_RAM_41 reserved for virtual uarts */

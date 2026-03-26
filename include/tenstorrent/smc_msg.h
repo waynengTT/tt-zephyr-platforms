@@ -155,6 +155,12 @@ enum tt_smc_msg {
 	TT_SMC_MSG_CONFIRM_FLASHED_SPI = 0xC4,
 	/** @brief Toggle red blinky on the board */
 	TT_SMC_MSG_BLINKY = 0xC5,
+	/** @brief Get LTSSM logger control register */
+	TT_SMC_MSG_GET_LTSSM_LOG_CONTROL = 0xC6,
+	/** @brief Get LTSSM log entries */
+	TT_SMC_MSG_GET_LTSSM_LOG_ENTRIES = 0xC7,
+	/** @brief Control LTSSM logger (enable/disable/clear) */
+	TT_SMC_MSG_CONTROL_LTSSM_LOGGER = 0xC8
 };
 
 /** @} */
