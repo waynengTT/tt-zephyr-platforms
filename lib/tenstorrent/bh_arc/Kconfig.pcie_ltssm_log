@@ -1,0 +1,42 @@
+# Copyright (c) 2026 Tenstorrent AI ULC
+# SPDX-License-Identifier: Apache-2.0
+
+config TT_BH_ARC_PCIE_LTSSM_LOG
+	bool "PCIe LTSSM training log"
+	help
+	  Record PCIe LTSSM state transitions observed while the link trains
+	  into a CSM buffer that the host can read back, for debugging link
+	  training failures. The buffer address is published to scratch
+	  register 24. This delays PCIe init by up to
+	  TT_BH_ARC_PCIE_LTSSM_LOG_TIMEOUT_MS, so it is intended for debug
+	  builds rather than production.
+
+if TT_BH_ARC_PCIE_LTSSM_LOG
+
+config TT_BH_ARC_PCIE_LTSSM_LOG_ENTRIES
+	int "LTSSM log capacity in entries"
+	default 256
+	range 8 4096
+	help
+	  Number of state transitions to record, shared across both PCIe
+	  instances. Each entry occupies 8 bytes of CSM.
+
+config TT_BH_ARC_PCIE_LTSSM_LOG_TIMEOUT_MS
+	int "LTSSM capture timeout in milliseconds"
+	default 200
+	range 1 2000
+	help
+	  Upper bound on how long PCIe init waits capturing transitions. In
+	  endpoint mode the link is trained by the host, so this bounds how
+	  long the firmware blocks waiting for a host that may never arrive.
+
+config TT_BH_ARC_PCIE_LTSSM_LOG_SETTLE_MS
+	int "LTSSM capture settle window in milliseconds"
+	default 10
+	range 0 500
+	help
+	  How much longer to keep capturing after the link reaches L0, to
+	  catch speed changes and retraining that follow link up. Capture
+	  ends early once this window elapses with no further transitions.
+
+endif # TT_BH_ARC_PCIE_LTSSM_LOG

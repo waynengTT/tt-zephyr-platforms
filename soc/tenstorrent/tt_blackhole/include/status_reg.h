@@ -81,6 +81,18 @@
  * Fixed at compile time for a given CMFW build.
  */
 #define RUNTIME_TELEMETRY_SIZE_REG_ADDR      RESET_UNIT_SCRATCH_RAM_REG_ADDR(23)
+/**
+ * @brief Register address of the PCIe LTSSM training log.
+ *
+ * Holds the CSM address of the LTSSM log written during PCIe init, or 0 when
+ * CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG is disabled. The log begins with a header
+ * describing its geometry; see pcie_ltssm_log.h.
+ */
+#define LTSSM_LOG_ADDR_REG_ADDR              RESET_UNIT_SCRATCH_RAM_REG_ADDR(24)
+/**
+ * @brief Register holding the size in bytes of the PCIe LTSSM training log.
+ */
+#define LTSSM_LOG_SIZE_REG_ADDR              RESET_UNIT_SCRATCH_RAM_REG_ADDR(25)
 
 #define STATUS_FW_VUART_REG_ADDR(n) RESET_UNIT_SCRATCH_RAM_REG_ADDR(40 + (n))
 /* SCRATCH_RAM_40 - SCRATCH_RAM_41 reserved for virtual uarts */

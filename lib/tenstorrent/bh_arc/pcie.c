@@ -10,6 +10,7 @@
 #include "irqnum.h"
 #include "noc2axi.h"
 #include "pcie.h"
+#include "pcie_ltssm_log.h"
 #include "pciesd.h"
 #include "reg.h"
 #include "status_reg.h"
@@ -445,6 +446,77 @@ static PCIeInitStatus PCIeInit(const struct CntlInitV2Param *param)
 	return status;
 }
 
+#ifdef CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG
+/*
+ * Capture LTSSM transitions while the link trains.
+ *
+ * In endpoint mode PCIeInit() returns as soon as the controller is set up and
+ * PollForLinkUp() is never reached, so training happens after PCIeInit() and
+ * has to be sampled here. ReadSiiReg() goes through the shared
+ * PCIE_SII_REG_TLB, which is left pointing at whichever instance initialized
+ * last, so re-point it explicitly for every sample rather than inheriting it.
+ */
+static void CaptureLtssmTraining(uint8_t inst_mask)
+{
+	const uint64_t deadline =
+		TimerTimestamp() + CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG_TIMEOUT_MS * WAIT_1MS;
+	const uint64_t settle = CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG_SETTLE_MS * WAIT_1MS;
+	uint8_t last_state[2] = {LTSSM_STATE_NONE, LTSSM_STATE_NONE};
+	uint64_t settle_until = 0;
+	int8_t tlb_inst = -1;
+
+	ltssm_log_reset();
+
+	while (!ltssm_log_full()) {
+		uint64_t now = TimerTimestamp();
+
+		if (now >= deadline || (settle_until != 0 && now >= settle_until)) {
+			break;
+		}
+
+		for (uint8_t inst = 0; inst < 2; inst++) {
+			if ((inst_mask & BIT(inst)) == 0) {
+				continue;
+			}
+
+			/*
+			 * Point the SII TLB at this instance, but only when it
+			 * is not already there: ConfigurePCIeTlbs() costs seven
+			 * NOC writes, which would dominate the sample rate on
+			 * the single-instance boards this mostly runs on.
+			 */
+			if (tlb_inst != (int8_t)inst) {
+				ConfigurePCIeTlbs(inst);
+				tlb_inst = inst;
+			}
+
+			PCIE_SII_LTSSM_STATE_reg_u ltssm_state;
+
+			ltssm_state.val = ReadSiiReg(PCIE_SII_A_LTSSM_STATE_REG_OFFSET);
+
+			uint8_t state = ltssm_state.f.smlh_ltssm_state_sync;
+
+			if (state == last_state[inst]) {
+				continue;
+			}
+			last_state[inst] = state;
+
+			ltssm_log_record(inst, state, ltssm_state.f.smlh_link_up_sync,
+					 ltssm_state.f.rdlh_link_up_sync, (uint32_t)now);
+
+			/*
+			 * Once the link is up, keep sampling for the settle
+			 * window so speed changes and retraining are caught,
+			 * then stop. Each new transition extends the window.
+			 */
+			if (state == LTSSM_STATE_L0) {
+				settle_until = now + settle;
+			}
+		}
+	}
+}
+#endif /* CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG */
+
 static int pcie_init(void)
 {
 	/* Initialize the serdes based on board type and asic location - data will be in fw_table */
@@ -481,6 +553,27 @@ static int pcie_init(void)
 	InitResetInterrupt(1);
 
 	WriteReg(PCIE_INIT_CPL_TIME_REG_ADDR, TimerTimestamp());
+
+#ifdef CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG
+	/*
+	 * After the completion timestamp, so capturing does not inflate the
+	 * reported PCIe init duration. Iterating instances in order leaves the
+	 * PCIe TLBs pointed at the highest enabled instance, which is where
+	 * the loop above already left them.
+	 */
+	uint8_t ltssm_inst_mask = 0;
+
+	if (pci0_property_table.pcie_mode != BH_PCIE_MODE_DISABLED) {
+		ltssm_inst_mask |= BIT(0);
+	}
+	if (pci1_property_table.pcie_mode != BH_PCIE_MODE_DISABLED) {
+		ltssm_inst_mask |= BIT(1);
+	}
+
+	if (ltssm_inst_mask != 0) {
+		CaptureLtssmTraining(ltssm_inst_mask);
+	}
+#endif
 
 	return 0;
 }
