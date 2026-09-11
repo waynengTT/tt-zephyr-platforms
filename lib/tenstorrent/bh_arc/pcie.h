@@ -17,6 +17,14 @@
 #define PCIE_BAR2_SIZE_DEFAULT_MB 1
 #define PCIE_BAR4_SIZE_DEFAULT_MB 32768
 
+/* Gen3 EQ tuning defaults. These are the values libpciesd hardcoded into
+ * GEN3_EQ_CONTROL_OFF before SYS-2216 moved them into the fw table, and are
+ * what CntlInitV2() still substitutes, so they are also the right fallback
+ * for the synthesized recovery table.
+ */
+#define PCIE_GEN3_EQ_PSET_REQ_VEC_DEFAULT 0x3E0 /* request presets 5-9 */
+#define PCIE_GEN3_EQ_FB_MODE_DEFAULT      1     /* figure of merit, not direction */
+
 typedef enum {
 	EndPoint = 0,
 	RootComplex = 1,
