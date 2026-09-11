@@ -448,32 +448,49 @@ static PCIeInitStatus PCIeInit(const struct CntlInitV2Param *param)
 
 #ifdef CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG
 /*
- * Capture LTSSM transitions while the link trains.
+ * Read the refclk counter without the carry glitch.
+ *
+ * TimerTimestamp() reads the counter's low half before its high half, so a
+ * carry landing between the two reads yields a value 2^32 ticks (86 s) in the
+ * future. A bounded capture never ran long enough to see one; a recorder that
+ * runs for hours would log a bogus jump roughly every 86 s. The counter only
+ * ever counts up, so a decrease between two reads can only be that glitch,
+ * and the smaller of the two is the untorn value.
+ */
+static uint64_t LtssmTimestamp(void)
+{
+	uint64_t first = TimerTimestamp();
+	uint64_t second = TimerTimestamp();
+
+	return second < first ? second : first;
+}
+
+/*
+ * Record LTSSM transitions for as long as the firmware runs.
  *
  * In endpoint mode PCIeInit() returns as soon as the controller is set up and
  * PollForLinkUp() is never reached, so training happens after PCIeInit() and
- * has to be sampled here. ReadSiiReg() goes through the shared
- * PCIE_SII_REG_TLB, which is left pointing at whichever instance initialized
- * last, so re-point it explicitly for every sample rather than inheriting it.
+ * has to be sampled here. On switch-attached boards the link partner is a
+ * downstream port trained by host BIOS, seconds to minutes later, so there is
+ * no window this function could close and still see the training: it samples
+ * until the chip is reset. Transitions within the CFG and RCVRY phases are as
+ * little as 600 ns apart, which is why this busy-polls rather than sleeping.
+ *
+ * This never returns, so nothing registered after pcie_init() runs. That is
+ * the point - it is a debug-only recorder, default off.
+ *
+ * ReadSiiReg() goes through the shared PCIE_SII_REG_TLB, which is left
+ * pointing at whichever instance initialized last, so re-point it explicitly
+ * rather than inheriting it.
  */
 static void CaptureLtssmTraining(uint8_t inst_mask)
 {
-	const uint64_t deadline =
-		TimerTimestamp() + CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG_TIMEOUT_MS * WAIT_1MS;
-	const uint64_t settle = CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG_SETTLE_MS * WAIT_1MS;
 	uint8_t last_state[2] = {LTSSM_STATE_NONE, LTSSM_STATE_NONE};
-	uint64_t settle_until = 0;
 	int8_t tlb_inst = -1;
 
 	ltssm_log_reset();
 
-	while (!ltssm_log_full()) {
-		uint64_t now = TimerTimestamp();
-
-		if (now >= deadline || (settle_until != 0 && now >= settle_until)) {
-			break;
-		}
-
+	while (true) {
 		for (uint8_t inst = 0; inst < 2; inst++) {
 			if ((inst_mask & BIT(inst)) == 0) {
 				continue;
@@ -496,22 +513,18 @@ static void CaptureLtssmTraining(uint8_t inst_mask)
 
 			uint8_t state = ltssm_state.f.smlh_ltssm_state_sync;
 
+			/*
+			 * Cheap early-out so an unchanging link costs one
+			 * register read per pass. ltssm_log_record() would
+			 * collapse the repeat anyway, but not this cheaply.
+			 */
 			if (state == last_state[inst]) {
 				continue;
 			}
 			last_state[inst] = state;
 
 			ltssm_log_record(inst, state, ltssm_state.f.smlh_link_up_sync,
-					 ltssm_state.f.rdlh_link_up_sync, (uint32_t)now);
-
-			/*
-			 * Once the link is up, keep sampling for the settle
-			 * window so speed changes and retraining are caught,
-			 * then stop. Each new transition extends the window.
-			 */
-			if (state == LTSSM_STATE_L0) {
-				settle_until = now + settle;
-			}
+					 ltssm_state.f.rdlh_link_up_sync, LtssmTimestamp());
 		}
 	}
 }
@@ -556,10 +569,12 @@ static int pcie_init(void)
 
 #ifdef CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG
 	/*
-	 * After the completion timestamp, so capturing does not inflate the
+	 * After the completion timestamp, so recording does not inflate the
 	 * reported PCIe init duration. Iterating instances in order leaves the
 	 * PCIe TLBs pointed at the highest enabled instance, which is where
 	 * the loop above already left them.
+	 *
+	 * CaptureLtssmTraining() does not return, so this has to stay last.
 	 */
 	uint8_t ltssm_inst_mask = 0;
 
