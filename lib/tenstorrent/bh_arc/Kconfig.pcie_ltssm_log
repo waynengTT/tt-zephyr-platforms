@@ -5,33 +5,38 @@ config TT_BH_ARC_PCIE_LTSSM_LOG
 	bool "PCIe LTSSM training log"
 	help
 	  Record PCIe LTSSM state transitions into a CSM ring buffer that the
-	  host can read back, for debugging link training failures. The buffer
-	  address is published to scratch register 24 and its size to 25.
+	  host can read back, for debugging link training failures, speed
+	  downgrades and recovery storms. The buffer address is published to
+	  scratch register 24 and its size to 25.
 
 	  Blackhole is a PCIe endpoint, so on switch-attached boards the link
-	  is trained by host BIOS long after PCIe init runs. The recorder
-	  therefore busy-polls indefinitely and never returns, which means no
-	  init step after PCIe runs: the chip parks at post code 8 and never
-	  reaches GDDR training (9), eth (A), the SMBus target (B), tensix
-	  init (D) or the host message queue, so there is no telemetry and no
-	  fan control. Both host readers reach the buffer with raw JTAG or
-	  NOC reads rather than the message queue, so they still work.
+	  is trained by host BIOS long after PCIe init runs, and the events
+	  worth seeing - link up, speed changes, recovery and EQ - keep
+	  happening afterwards. Recording therefore runs on its own thread,
+	  indefinitely, and pcie_init() is not delayed at all: the chip boots
+	  normally and brings the link up, which is the point.
 
-	  This produces a debug firmware for capturing link training, not a
-	  bootable one, so it is default off and must be enabled explicitly.
+	  The thread runs at the lowest application priority and busy-polls,
+	  so it consumes cycles the idle thread would otherwise take and can
+	  miss transitions while descheduled. Intended for debug builds.
 
 if TT_BH_ARC_PCIE_LTSSM_LOG
 
 config TT_BH_ARC_PCIE_LTSSM_LOG_ENTRIES
 	int "LTSSM log capacity in entries"
-	default 256
-	range 8 4096
+	default 4096
+	range 8 32768
 	help
 	  Number of transitions the ring holds, shared across both PCIe
-	  instances. Each entry occupies 16 bytes of CSM. The ring retains the
-	  most recent transitions, and consecutive repeats of a state - or of a
-	  two-state alternation such as Detect churn - are collapsed into a
-	  repeat count rather than consuming entries, so the default covers far
-	  more elapsed time than its entry count suggests.
+	  instances. Each entry occupies 16 bytes of CSM, so the default costs
+	  64 KiB. CSM is largely unused, and a build with roughly 160 KiB
+	  spare can take 8192 entries; the linker will fail loudly if the
+	  region cannot fit the choice.
+
+	  The ring retains the most recent transitions, and consecutive
+	  repeats of a state - or of a two-state alternation such as Detect
+	  churn - are collapsed into a repeat count rather than consuming
+	  entries, so this covers far more elapsed time than its entry count
+	  suggests.
 
 endif # TT_BH_ARC_PCIE_LTSSM_LOG

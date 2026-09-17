@@ -23,7 +23,6 @@
 
 #include <tenstorrent/post_code.h>
 #include <tenstorrent/sys_init_defines.h>
-#include <zephyr/dfu/mcuboot.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/dma.h>
 #include <zephyr/drivers/dma/dma_arc_hs.h>
@@ -37,6 +36,13 @@
 #define PCIE_SERDES1_CTRL_TLB      3
 #define PCIE_SII_REG_TLB           4
 #define PCIE_TLB_CONFIG_TLB        5
+/*
+ * Owned exclusively by the LTSSM recorder thread. It must not share the TLBs
+ * ConfigurePCIeTlbs() programs: those are reprogrammed at runtime by eth
+ * (0), the throttler (1) and PCIe DMA (14), so a long-lived sampler calling
+ * ConfigurePCIeTlbs() would corrupt their windows. 6-10 and 15 are unused.
+ */
+#define PCIE_LTSSM_SII_TLB         6
 
 #define SERDES_INST_OFFSET         0x04000000
 #define PCIE_SERDES_SOC_REG_OFFSET 0x03000000
@@ -473,53 +479,26 @@ static uint64_t LtssmTimestamp(void)
  *
  * In endpoint mode PCIeInit() returns as soon as the controller is set up and
  * PollForLinkUp() is never reached, so training happens after PCIeInit() and
- * has to be sampled here. On switch-attached boards the link partner is a
- * downstream port trained by host BIOS, seconds to minutes later, so there is
- * no window this function could close and still see the training: it samples
- * until the chip is reset. Transitions within the CFG and RCVRY phases are as
- * little as 600 ns apart, which is why this busy-polls rather than sleeping.
+ * has to be sampled separately. On switch-attached boards the link partner is
+ * a downstream port trained by host BIOS, seconds to minutes later, and the
+ * interesting events - link up, speed changes, recovery and EQ - continue
+ * indefinitely after that. So this never returns.
  *
- * This never returns, so nothing registered after pcie_init() runs. That is
- * the point - it is a debug-only recorder, default off.
+ * It therefore runs on its own thread rather than inside pcie_init(): the
+ * chip has to finish booting and bring the link up, because that is what is
+ * being recorded. Blocking pcie_init() would also leave the image
+ * unconfirmed, and MCUBoot would revert it on the next boot.
  *
- * ReadSiiReg() goes through the shared PCIE_SII_REG_TLB, which is left
- * pointing at whichever instance initialized last, so re-point it explicitly
- * rather than inheriting it.
+ * Transitions within the CFG and RCVRY phases are as little as 600 ns apart,
+ * so this busy-polls rather than sleeping. At the lowest preemptible priority
+ * that consumes only cycles the idle thread would have taken, and every ISR,
+ * timer and workqueue item still preempts it - at the cost of possibly
+ * missing edges while it is descheduled.
  */
 static void CaptureLtssmTraining(uint8_t inst_mask)
 {
 	uint8_t last_state[2] = {LTSSM_STATE_NONE, LTSSM_STATE_NONE};
 	int8_t tlb_inst = -1;
-
-#ifdef CONFIG_BOOTLOADER_MCUBOOT
-	/*
-	 * Confirm the image before the point of no return.
-	 *
-	 * main() normally does this, but SYS_INIT_APP runs before main() and
-	 * this function never returns, so main() is never reached. With
-	 * CONFIG_BOOT_RAM_LOAD_REVERT an unconfirmed image is reverted on the
-	 * next boot, which would silently swap the recorder back out for the
-	 * previous firmware and leave the log unpublished.
-	 *
-	 * Deliberately gives up the revert safety net: this image does not
-	 * finish booting, so it can only be replaced by reflashing.
-	 * InitSpiFS (prio 92) is well ahead of pcie_init (103), so the flash
-	 * is ready here.
-	 */
-	if (!boot_is_img_confirmed()) {
-		int rc = boot_write_img_confirmed();
-
-		if (rc < 0) {
-			LOG_ERR("LTSSM log: failed to confirm image (%d); it will be "
-				"reverted on the next boot",
-				rc);
-		} else {
-			LOG_INF("LTSSM log: image confirmed; it will persist until reflashed");
-		}
-	}
-#endif
-
-	ltssm_log_reset();
 
 	while (true) {
 		for (uint8_t inst = 0; inst < 2; inst++) {
@@ -528,19 +507,23 @@ static void CaptureLtssmTraining(uint8_t inst_mask)
 			}
 
 			/*
-			 * Point the SII TLB at this instance, but only when it
-			 * is not already there: ConfigurePCIeTlbs() costs seven
-			 * NOC writes, which would dominate the sample rate on
-			 * the single-instance boards this mostly runs on.
+			 * Point this thread's own TLB at the instance, only
+			 * when it is not already there. Single-instance boards
+			 * pay for this once and then every sample is a bare
+			 * load with no NOC writes at all.
 			 */
 			if (tlb_inst != (int8_t)inst) {
-				ConfigurePCIeTlbs(inst);
+				NOC2AXITlbSetup(0, PCIE_LTSSM_SII_TLB,
+						inst == 0 ? PCIE_INST0_LOGICAL_X
+							  : PCIE_INST1_LOGICAL_X,
+						PCIE_LOGICAL_Y, PCIE_SII_A_REG_MAP_BASE_ADDR);
 				tlb_inst = inst;
 			}
 
 			PCIE_SII_LTSSM_STATE_reg_u ltssm_state;
 
-			ltssm_state.val = ReadSiiReg(PCIE_SII_A_LTSSM_STATE_REG_OFFSET);
+			ltssm_state.val = NOC2AXIRead32(0, PCIE_LTSSM_SII_TLB,
+							PCIE_SII_A_LTSSM_STATE_REG_OFFSET);
 
 			uint8_t state = ltssm_state.f.smlh_ltssm_state_sync;
 
@@ -558,6 +541,51 @@ static void CaptureLtssmTraining(uint8_t inst_mask)
 					 ltssm_state.f.rdlh_link_up_sync, LtssmTimestamp());
 		}
 	}
+}
+
+/*
+ * Reads registers into a static buffer, with no logging or formatting on the
+ * path, so it needs very little. Rounded up well past that because
+ * CONFIG_HW_STACK_PROTECTION is off here, which would make an overflow
+ * silent memory corruption rather than a fault.
+ */
+#define LTSSM_LOG_STACK_SIZE 1024
+
+static K_THREAD_STACK_DEFINE(ltssm_log_stack, LTSSM_LOG_STACK_SIZE);
+static struct k_thread ltssm_log_thread;
+static uint8_t ltssm_log_inst_mask;
+
+static void LtssmLogThread(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	CaptureLtssmTraining(ltssm_log_inst_mask);
+}
+
+/*
+ * Start recording and return. The thread runs at the lowest application
+ * priority, so it only gets the CPU once the rest of init has finished; a
+ * link event during the remaining init steps may therefore be sampled late
+ * or missed, which the repeat counts and dropped counter make visible.
+ */
+static void StartLtssmLogThread(uint8_t inst_mask)
+{
+	ltssm_log_inst_mask = inst_mask;
+
+	/*
+	 * Publish the buffer here rather than from the thread, so scratch 24
+	 * is valid as soon as pcie_init() returns. If it were left to the
+	 * thread, a hang in a later init step would leave the host reading 0
+	 * and reporting the feature as not built in.
+	 */
+	ltssm_log_reset();
+
+	k_thread_create(&ltssm_log_thread, ltssm_log_stack,
+			K_THREAD_STACK_SIZEOF(ltssm_log_stack), LtssmLogThread, NULL, NULL, NULL,
+			K_LOWEST_APPLICATION_THREAD_PRIO, 0, K_NO_WAIT);
+	k_thread_name_set(&ltssm_log_thread, "ltssm_log");
 }
 #endif /* CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG */
 
@@ -601,11 +629,8 @@ static int pcie_init(void)
 #ifdef CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG
 	/*
 	 * After the completion timestamp, so recording does not inflate the
-	 * reported PCIe init duration. Iterating instances in order leaves the
-	 * PCIe TLBs pointed at the highest enabled instance, which is where
-	 * the loop above already left them.
-	 *
-	 * CaptureLtssmTraining() does not return, so this has to stay last.
+	 * reported PCIe init duration. The recorder owns its own TLB, so it
+	 * does not care where ConfigurePCIeTlbs() left the shared ones.
 	 */
 	uint8_t ltssm_inst_mask = 0;
 
@@ -617,7 +642,7 @@ static int pcie_init(void)
 	}
 
 	if (ltssm_inst_mask != 0) {
-		CaptureLtssmTraining(ltssm_inst_mask);
+		StartLtssmLogThread(ltssm_inst_mask);
 	}
 #endif
 
