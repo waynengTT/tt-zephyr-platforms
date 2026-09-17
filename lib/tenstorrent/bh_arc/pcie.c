@@ -23,6 +23,7 @@
 
 #include <tenstorrent/post_code.h>
 #include <tenstorrent/sys_init_defines.h>
+#include <zephyr/dfu/mcuboot.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/dma.h>
 #include <zephyr/drivers/dma/dma_arc_hs.h>
@@ -489,6 +490,34 @@ static void CaptureLtssmTraining(uint8_t inst_mask)
 {
 	uint8_t last_state[2] = {LTSSM_STATE_NONE, LTSSM_STATE_NONE};
 	int8_t tlb_inst = -1;
+
+#ifdef CONFIG_BOOTLOADER_MCUBOOT
+	/*
+	 * Confirm the image before the point of no return.
+	 *
+	 * main() normally does this, but SYS_INIT_APP runs before main() and
+	 * this function never returns, so main() is never reached. With
+	 * CONFIG_BOOT_RAM_LOAD_REVERT an unconfirmed image is reverted on the
+	 * next boot, which would silently swap the recorder back out for the
+	 * previous firmware and leave the log unpublished.
+	 *
+	 * Deliberately gives up the revert safety net: this image does not
+	 * finish booting, so it can only be replaced by reflashing.
+	 * InitSpiFS (prio 92) is well ahead of pcie_init (103), so the flash
+	 * is ready here.
+	 */
+	if (!boot_is_img_confirmed()) {
+		int rc = boot_write_img_confirmed();
+
+		if (rc < 0) {
+			LOG_ERR("LTSSM log: failed to confirm image (%d); it will be "
+				"reverted on the next boot",
+				rc);
+		} else {
+			LOG_INF("LTSSM log: image confirmed; it will persist until reflashed");
+		}
+	}
+#endif
 
 	ltssm_log_reset();
 
