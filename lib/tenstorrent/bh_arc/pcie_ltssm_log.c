@@ -58,9 +58,10 @@ void ltssm_log_reset(void)
 	WriteReg(LTSSM_LOG_SIZE_REG_ADDR, sizeof(ltssm_log));
 }
 
-static inline bool ltssm_log_entry_is(int32_t idx, uint32_t info)
+static inline bool ltssm_log_entry_is(int32_t idx, uint32_t info, uint32_t cdr)
 {
-	return (ltssm_log.entries[idx].info & LTSSM_INFO_ID_MASK) == info;
+	return (ltssm_log.entries[idx].info & LTSSM_INFO_ID_MASK) == info &&
+	       ltssm_log.entries[idx].cdr == cdr;
 }
 
 /* Fold another observation of an already recorded state into its entry. */
@@ -80,7 +81,7 @@ static void ltssm_log_bump(int32_t idx, uint64_t timestamp)
 }
 
 void ltssm_log_record(uint8_t pcie_inst, uint8_t state, bool link_up, bool rdlh_link_up,
-		      uint64_t timestamp)
+		      uint32_t cdr, uint64_t timestamp)
 {
 	uint32_t info = (state << LTSSM_INFO_STATE_SHIFT) & LTSSM_INFO_STATE_MASK;
 
@@ -101,12 +102,12 @@ void ltssm_log_record(uint8_t pcie_inst, uint8_t state, bool link_up, bool rdlh_
 	 * seen, so an endless two-state churn costs a fixed two entries. The
 	 * entries themselves never move, so ring order stays chronological.
 	 */
-	if (ltssm_log_newest >= 0 && ltssm_log_entry_is(ltssm_log_newest, info)) {
+	if (ltssm_log_newest >= 0 && ltssm_log_entry_is(ltssm_log_newest, info, cdr)) {
 		ltssm_log_bump(ltssm_log_newest, timestamp);
 		return;
 	}
 
-	if (ltssm_log_prev >= 0 && ltssm_log_entry_is(ltssm_log_prev, info)) {
+	if (ltssm_log_prev >= 0 && ltssm_log_entry_is(ltssm_log_prev, info, cdr)) {
 		ltssm_log_bump(ltssm_log_prev, timestamp);
 
 		int32_t swap = ltssm_log_newest;
@@ -122,6 +123,7 @@ void ltssm_log_record(uint8_t pcie_inst, uint8_t state, bool link_up, bool rdlh_
 		.timestamp = timestamp,
 		.info = info,
 		.last_delta = 0,
+		.cdr = cdr,
 	};
 
 	/*

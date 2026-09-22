@@ -39,4 +39,26 @@ config TT_BH_ARC_PCIE_LTSSM_LOG_ENTRIES
 	  entries, so this covers far more elapsed time than its entry count
 	  suggests.
 
+config TT_BH_ARC_PCIE_LTSSM_LOG_CDR_POLL_DIV
+	int "Sample the PHY's CDR lock once every N passes"
+	default 1
+	range 1 4096
+	help
+	  Once the link is past Detect, the recorder reads the SerDes per-lane
+	  CDR lock and logs an entry whenever it changes, so that lock
+	  asserting gets its own timestamped row on the same timebase as the
+	  LTSSM transitions.
+
+	  That costs one NOC read per lane, on top of the single read a pass
+	  otherwise needs, which lengthens the sampling pass and so widens the
+	  window in which a short-lived LTSSM state can be missed. Transitions
+	  within the Recovery phases can be under a microsecond apart, so on a
+	  wide link the two resolutions trade against each other.
+
+	  1 polls on every pass, giving the finest view of when CDR locked at
+	  the largest cost to LTSSM edge capture. Raise it to protect LTSSM
+	  resolution: the pass cost falls by the same factor, while the time
+	  to notice a CDR change grows by it. Detect is never sampled at any
+	  setting.
+
 endif # TT_BH_ARC_PCIE_LTSSM_LOG

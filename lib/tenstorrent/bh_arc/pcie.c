@@ -43,6 +43,14 @@
  * ConfigurePCIeTlbs() would corrupt their windows. 6-10 and 15 are unused.
  */
 #define PCIE_LTSSM_SII_TLB         6
+/*
+ * Also owned exclusively by the recorder, and for the same reason: the
+ * AlphaCore windows ConfigurePCIeTlbs() programs are TLBs 0 and 1, which eth
+ * and the throttler reprogram at runtime. One TLB per SerDes instance, so a
+ * x16 link reads all 16 lanes without retargeting anything between lanes.
+ */
+#define PCIE_LTSSM_PHY0_TLB        7
+#define PCIE_LTSSM_PHY1_TLB        8
 
 #define SERDES_INST_OFFSET         0x04000000
 #define PCIE_SERDES_SOC_REG_OFFSET 0x03000000
@@ -61,6 +69,17 @@
 #define PCIE_SII_A_NOC_TLB_DATA_0__REG_OFFSET  0x00000134
 #define PCIE_SII_A_APP_PCIE_CTL_REG_OFFSET     0x0000005C
 #define PCIE_SII_A_LTSSM_STATE_REG_OFFSET      0x00000128
+
+/*
+ * AlphaCore per-lane status, relative to CMN_A_REG_MAP_BASE_ADDR: the DFXn_a
+ * block's dig_soc_lane_stat_reg1, whose octl_rx_data_vld field is the PHY's
+ * RX CDR lock. Lane blocks are 64 KiB apart and there are eight per SerDes
+ * instance, so the whole set fits one 16 MiB TLB window.
+ */
+#define PHY_LANE_STAT_REG1_OFFSET 0x00013038
+#define PHY_LANE_STRIDE           0x00010000
+#define PHY_LANES_PER_SERDES      8
+#define PHY_OCTL_RX_DATA_VLD      BIT(1)
 
 LOG_MODULE_DECLARE(bh_arc);
 
@@ -475,6 +494,39 @@ static uint64_t LtssmTimestamp(void)
 }
 
 /*
+ * Read CDR lock for the first @a lanes lanes of whichever instance this
+ * thread's PHY TLBs currently point at, as a bitmap with one bit per lane,
+ * tagged with the lane count so a host can tell "not locked" from "not
+ * sampled".
+ *
+ * One NOC read per lane, which is why the caller gates this on the LTSSM
+ * state rather than doing it unconditionally.
+ */
+static uint32_t ReadCdrLock(uint8_t lanes)
+{
+	uint32_t bitmap = 0;
+
+	for (uint8_t lane = 0; lane < lanes; lane++) {
+		uint8_t tlb = lane < PHY_LANES_PER_SERDES ? PCIE_LTSSM_PHY0_TLB
+							  : PCIE_LTSSM_PHY1_TLB;
+		uint32_t offset = PHY_LANE_STAT_REG1_OFFSET +
+				  (lane % PHY_LANES_PER_SERDES) * PHY_LANE_STRIDE;
+
+		if (NOC2AXIRead32(0, tlb, offset) & PHY_OCTL_RX_DATA_VLD) {
+			bitmap |= BIT(lane);
+		}
+	}
+
+	return bitmap | ((uint32_t)lanes << LTSSM_CDR_LANES_SHIFT);
+}
+
+/*
+ * The LTSSM states that make up Detect, which are not contiguous:
+ * S_DETECT_QUIET, S_DETECT_ACT, S_PRE_DETECT_QUIET and S_DETECT_WAIT.
+ */
+#define LTSSM_DETECT_STATES (BIT64(0x00) | BIT64(0x01) | BIT64(0x05) | BIT64(0x06))
+
+/*
  * Record LTSSM transitions for as long as the firmware runs.
  *
  * In endpoint mode PCIeInit() returns as soon as the controller is set up and
@@ -495,9 +547,11 @@ static uint64_t LtssmTimestamp(void)
  * timer and workqueue item still preempts it - at the cost of possibly
  * missing edges while it is descheduled.
  */
-static void CaptureLtssmTraining(uint8_t inst_mask)
+static void CaptureLtssmTraining(uint8_t inst_mask, const uint8_t *lanes)
 {
 	uint8_t last_state[2] = {LTSSM_STATE_NONE, LTSSM_STATE_NONE};
+	uint32_t last_cdr[2] = {0, 0};
+	uint32_t poll_div[2] = {0, 0};
 	int8_t tlb_inst = -1;
 
 	while (true) {
@@ -507,16 +561,21 @@ static void CaptureLtssmTraining(uint8_t inst_mask)
 			}
 
 			/*
-			 * Point this thread's own TLB at the instance, only
-			 * when it is not already there. Single-instance boards
-			 * pay for this once and then every sample is a bare
-			 * load with no NOC writes at all.
+			 * Point this thread's own TLBs at the instance, only
+			 * when they are not already there. Single-instance
+			 * boards pay for this once and then every sample is a
+			 * bare load with no NOC writes at all.
 			 */
 			if (tlb_inst != (int8_t)inst) {
-				NOC2AXITlbSetup(0, PCIE_LTSSM_SII_TLB,
-						inst == 0 ? PCIE_INST0_LOGICAL_X
-							  : PCIE_INST1_LOGICAL_X,
-						PCIE_LOGICAL_Y, PCIE_SII_A_REG_MAP_BASE_ADDR);
+				uint8_t x = inst == 0 ? PCIE_INST0_LOGICAL_X
+						      : PCIE_INST1_LOGICAL_X;
+
+				NOC2AXITlbSetup(0, PCIE_LTSSM_SII_TLB, x, PCIE_LOGICAL_Y,
+						PCIE_SII_A_REG_MAP_BASE_ADDR);
+				NOC2AXITlbSetup(0, PCIE_LTSSM_PHY0_TLB, x, PCIE_LOGICAL_Y,
+						CMN_A_REG_MAP_BASE_ADDR);
+				NOC2AXITlbSetup(0, PCIE_LTSSM_PHY1_TLB, x, PCIE_LOGICAL_Y,
+						CMN_A_REG_MAP_BASE_ADDR + SERDES_INST_OFFSET);
 				tlb_inst = inst;
 			}
 
@@ -528,17 +587,41 @@ static void CaptureLtssmTraining(uint8_t inst_mask)
 			uint8_t state = ltssm_state.f.smlh_ltssm_state_sync;
 
 			/*
+			 * Poll the PHY once the link is past Detect, so that
+			 * CDR locking shows up as its own timestamped entry
+			 * rather than only as whatever the state was when it
+			 * happened. Inside Detect there is no partner signal
+			 * to lock to, so the lane reads are skipped entirely
+			 * and the Detect churn stays as cheap as it was.
+			 *
+			 * Carrying the last value forward on the passes that
+			 * do not poll keeps a pure state change from looking
+			 * like a CDR change as well.
+			 */
+			uint32_t cdr = last_cdr[inst];
+
+			if (LTSSM_DETECT_STATES & BIT64(state)) {
+				cdr = 0;
+			} else if (++poll_div[inst] >=
+				   CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG_CDR_POLL_DIV) {
+				poll_div[inst] = 0;
+				cdr = ReadCdrLock(lanes[inst]);
+			}
+
+			/*
 			 * Cheap early-out so an unchanging link costs one
 			 * register read per pass. ltssm_log_record() would
 			 * collapse the repeat anyway, but not this cheaply.
 			 */
-			if (state == last_state[inst]) {
+			if (state == last_state[inst] && cdr == last_cdr[inst]) {
 				continue;
 			}
 			last_state[inst] = state;
+			last_cdr[inst] = cdr;
 
 			ltssm_log_record(inst, state, ltssm_state.f.smlh_link_up_sync,
-					 ltssm_state.f.rdlh_link_up_sync, LtssmTimestamp());
+					 ltssm_state.f.rdlh_link_up_sync, cdr,
+					 LtssmTimestamp());
 		}
 	}
 }
@@ -554,6 +637,7 @@ static void CaptureLtssmTraining(uint8_t inst_mask)
 static K_THREAD_STACK_DEFINE(ltssm_log_stack, LTSSM_LOG_STACK_SIZE);
 static struct k_thread ltssm_log_thread;
 static uint8_t ltssm_log_inst_mask;
+static uint8_t ltssm_log_lanes[2];
 
 static void LtssmLogThread(void *p1, void *p2, void *p3)
 {
@@ -561,7 +645,7 @@ static void LtssmLogThread(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
-	CaptureLtssmTraining(ltssm_log_inst_mask);
+	CaptureLtssmTraining(ltssm_log_inst_mask, ltssm_log_lanes);
 }
 
 /*
@@ -570,9 +654,11 @@ static void LtssmLogThread(void *p1, void *p2, void *p3)
  * link event during the remaining init steps may therefore be sampled late
  * or missed, which the repeat counts and dropped counter make visible.
  */
-static void StartLtssmLogThread(uint8_t inst_mask)
+static void StartLtssmLogThread(uint8_t inst_mask, const uint8_t *lanes)
 {
 	ltssm_log_inst_mask = inst_mask;
+	ltssm_log_lanes[0] = MIN(lanes[0], LTSSM_CDR_MAX_LANES);
+	ltssm_log_lanes[1] = MIN(lanes[1], LTSSM_CDR_MAX_LANES);
 
 	/*
 	 * Publish the buffer here rather than from the thread, so scratch 24
@@ -633,16 +719,20 @@ static int pcie_init(void)
 	 * does not care where ConfigurePCIeTlbs() left the shared ones.
 	 */
 	uint8_t ltssm_inst_mask = 0;
+	/* One AlphaCore SerDes instance drives eight lanes. */
+	uint8_t ltssm_lanes[2] = {0, 0};
 
 	if (pci0_property_table.pcie_mode != BH_PCIE_MODE_DISABLED) {
 		ltssm_inst_mask |= BIT(0);
+		ltssm_lanes[0] = pci0_property_table.num_serdes * PHY_LANES_PER_SERDES;
 	}
 	if (pci1_property_table.pcie_mode != BH_PCIE_MODE_DISABLED) {
 		ltssm_inst_mask |= BIT(1);
+		ltssm_lanes[1] = pci1_property_table.num_serdes * PHY_LANES_PER_SERDES;
 	}
 
 	if (ltssm_inst_mask != 0) {
-		StartLtssmLogThread(ltssm_inst_mask);
+		StartLtssmLogThread(ltssm_inst_mask, ltssm_lanes);
 	}
 #endif
 

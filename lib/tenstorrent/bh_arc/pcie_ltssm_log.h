@@ -54,12 +54,30 @@ enum ltssm_state {
 	(LTSSM_INFO_STATE_MASK | LTSSM_INFO_LINK_UP | LTSSM_INFO_RDLH_LINK_UP | LTSSM_INFO_INST)
 
 /*
+ * Bit layout of struct ltssm_log_entry::cdr.
+ *
+ * LOCK holds one bit per lane, bit N for lane N, taken from the SerDes
+ * per-lane status register's rx-data-valid field - the PHY's "RX CDR is
+ * locked onto incoming data" indication.
+ *
+ * LANES is how many lanes were actually read, which makes an entry
+ * self-describing: zero means the PHY was not sampled for this entry, so a
+ * clear LOCK bit reads as "unknown" rather than "not locked". The recorder
+ * leaves it zero throughout Detect, where there is no partner signal to lock
+ * to and sampling would only cost NOC reads.
+ */
+#define LTSSM_CDR_LOCK_MASK   0x0000FFFFU
+#define LTSSM_CDR_LANES_MASK  0x001F0000U
+#define LTSSM_CDR_LANES_SHIFT 16
+#define LTSSM_CDR_MAX_LANES   16
+
+/*
  * One run of consecutive observations of the same state.
  *
- * A run is a single state that was observed @a repeat + 1 times without a
- * different state being recorded in between, or - so that Detect churn cannot
- * evict real training data - one half of a two-state alternation that the
- * recorder collapsed in place. See ltssm_log_record().
+ * A run is a single state-and-CDR observation that was seen @a repeat + 1
+ * times without a different one being recorded in between, or - so that
+ * Detect churn cannot evict real training data - one half of a two-state
+ * alternation that the recorder collapsed in place. See ltssm_log_record().
  */
 struct ltssm_log_entry {
 	/*
@@ -78,15 +96,26 @@ struct ltssm_log_entry {
 	 * of the entry after it.
 	 */
 	uint32_t last_delta;
+	/*
+	 * Per-lane CDR lock and the lane count it covers; see LTSSM_CDR_*.
+	 * Part of a run's identity, not a payload: two observations fold into
+	 * one entry only when this matches too, so a lane gaining or losing
+	 * lock opens a new entry even though the LTSSM state did not change.
+	 * That is what puts a timestamped row at the moment lock asserts.
+	 */
+	uint32_t cdr;
+	/* Pads the entry to 24 bytes explicitly rather than by chance. */
+	uint32_t rsvd;
 };
 
 #define LTSSM_LOG_MAGIC 0x4D53544CU /* "LTSM" */
 /*
  * Version 2 changed the buffer from a linear array of 8-byte entries into a
- * wrapping ring of 16-byte entries carrying repeat counts. Both host readers
- * check the version and fail cleanly on a mismatch.
+ * wrapping ring of 16-byte entries carrying repeat counts. Version 3 widened
+ * the entry again to carry the PHY's per-lane CDR lock bitmap. Both host
+ * readers check the version and fail cleanly on a mismatch.
  */
-#define LTSSM_LOG_VERSION 2U
+#define LTSSM_LOG_VERSION 3U
 
 /* Refclk is 50 MHz (20 ns period); see WAIT_1MS in timer.h. */
 #define LTSSM_LOG_TICK_HZ 50000000U
@@ -143,11 +172,12 @@ void ltssm_log_reset(void);
  * Two kinds of repetition are collapsed in place instead of appending, so a
  * link that churns for minutes cannot evict real training data:
  *
- *  - the same state observed again, which bumps the newest entry's repeat
- *    count, and
- *  - a state matching the entry before the newest one, which bumps that
- *    entry's repeat count instead. This is what folds an endless
- *    DETECT_QUIET <-> DETECT_ACT alternation into a fixed two entries.
+ *  - the same state and CDR observed again, which bumps the newest entry's
+ *    repeat count, and
+ *  - an observation matching the entry before the newest one, which bumps
+ *    that entry's repeat count instead. This is what folds an endless
+ *    DETECT_QUIET <-> DETECT_ACT alternation into a fixed two entries, and
+ *    equally bounds a lane whose CDR lock flaps in place at two entries.
  *
  * A collapsed entry keeps the timestamp of its first observation and tracks
  * the last one in @a last_delta. Callers may suppress unchanged states
@@ -158,9 +188,11 @@ void ltssm_log_reset(void);
  * @param state Raw smlh_ltssm_state_sync value
  * @param link_up Value of smlh_link_up_sync
  * @param rdlh_link_up Value of rdlh_link_up_sync
+ * @param cdr Per-lane CDR lock and lane count; see LTSSM_CDR_*. Zero when
+ *            the PHY was not sampled for this observation.
  * @param timestamp Refclk timestamp of the observation
  */
 void ltssm_log_record(uint8_t pcie_inst, uint8_t state, bool link_up, bool rdlh_link_up,
-		      uint64_t timestamp);
+		      uint32_t cdr, uint64_t timestamp);
 
 #endif /* PCIE_LTSSM_LOG_H */
