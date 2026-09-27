@@ -54,6 +54,8 @@ struct CntlInitV3Param {
 	uint64_t region4_mask;
 	uint32_t gen3_eq_pset_req_vec;
 	uint8_t gen3_eq_fb_mode;
+	uint32_t gen4_eq_pset_req_vec; /* 0: use gen3_eq_pset_req_vec */
+	uint32_t gen5_eq_pset_req_vec; /* 0: use gen3_eq_pset_req_vec */
 };
 
 /* V3 only appends, so every field it shares with V2 must sit at the same

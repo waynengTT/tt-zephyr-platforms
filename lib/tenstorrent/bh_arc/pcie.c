@@ -282,6 +282,8 @@ static void CntlInitV3ParamInit(uint8_t pcie_inst, uint64_t board_id, uint32_t v
 		.region4_mask = bar_sizes[2],
 		.gen3_eq_pset_req_vec = pcitable->gen3_eq_pset_req_vec,
 		.gen3_eq_fb_mode = pcitable->gen3_eq_fb_mode,
+		.gen4_eq_pset_req_vec = pcitable->gen4_eq_pset_req_vec,
+		.gen5_eq_pset_req_vec = pcitable->gen5_eq_pset_req_vec,
 	};
 }
 

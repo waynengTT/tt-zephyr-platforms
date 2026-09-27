@@ -36,6 +36,9 @@ struct bh_pci_property {
 	 */
 	uint32_t gen3_eq_pset_req_vec;
 	uint32_t gen3_eq_fb_mode;
+	/* 0 means use gen3_eq_pset_req_vec for that rate */
+	uint32_t gen4_eq_pset_req_vec;
+	uint32_t gen5_eq_pset_req_vec;
 };
 
 /* True if this is a UBB (Galaxy) board. Used to skip DMC cable-fault checks.
