@@ -64,7 +64,8 @@ enum ltssm_state {
  * self-describing: zero means the PHY was not sampled for this entry, so a
  * clear LOCK bit reads as "unknown" rather than "not locked". The recorder
  * leaves it zero throughout Detect, where there is no partner signal to lock
- * to and sampling would only cost NOC reads.
+ * to and sampling would only cost NOC reads, and always when built without
+ * CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG_CDR.
  */
 #define LTSSM_CDR_LOCK_MASK   0x0000FFFFU
 #define LTSSM_CDR_LANES_MASK  0x001F0000U

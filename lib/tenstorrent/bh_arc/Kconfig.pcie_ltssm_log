@@ -18,7 +18,10 @@ config TT_BH_ARC_PCIE_LTSSM_LOG
 
 	  The thread runs at the lowest application priority and busy-polls,
 	  so it consumes cycles the idle thread would otherwise take and can
-	  miss transitions while descheduled. Intended for debug builds.
+	  miss transitions while descheduled. Intended for debug builds, so it
+	  is off by default; build with -DCONFIG_TT_BH_ARC_PCIE_LTSSM_LOG=y to
+	  enable it. Per-lane CDR lock is a separate option on top of this,
+	  TT_BH_ARC_PCIE_LTSSM_LOG_CDR.
 
 if TT_BH_ARC_PCIE_LTSSM_LOG
 
@@ -28,10 +31,9 @@ config TT_BH_ARC_PCIE_LTSSM_LOG_ENTRIES
 	range 8 32768
 	help
 	  Number of transitions the ring holds, shared across both PCIe
-	  instances. Each entry occupies 16 bytes of CSM, so the default costs
-	  64 KiB. CSM is largely unused, and a build with roughly 160 KiB
-	  spare can take 8192 entries; the linker will fail loudly if the
-	  region cannot fit the choice.
+	  instances. Each entry occupies 24 bytes of CSM, so the default costs
+	  96 KiB and 8192 entries cost 192 KiB. CSM is largely unused; the
+	  linker will fail loudly if the region cannot fit the choice.
 
 	  The ring retains the most recent transitions, and consecutive
 	  repeats of a state - or of a two-state alternation such as Detect
@@ -39,21 +41,31 @@ config TT_BH_ARC_PCIE_LTSSM_LOG_ENTRIES
 	  entries, so this covers far more elapsed time than its entry count
 	  suggests.
 
+config TT_BH_ARC_PCIE_LTSSM_LOG_CDR
+	bool "Also log per-lane CDR lock"
+	help
+	  Once the link is past Detect, the recorder also reads the SerDes
+	  per-lane CDR lock and logs an entry whenever it changes, so that
+	  lock asserting gets its own timestamped row on the same timebase as
+	  the LTSSM transitions. This uses NOC2AXI TLBs 7 and 8 in addition to
+	  the log's TLB 6.
+
+	  Off by default, because each sample costs one NOC read per lane on
+	  top of the single read a pass otherwise needs, which lengthens the
+	  sampling pass and so widens the window in which a short-lived LTSSM
+	  state can be missed. When off, every entry records CDR as not
+	  sampled (a lane count of 0), which the host readers show as "-".
+	  Build with -DCONFIG_TT_BH_ARC_PCIE_LTSSM_LOG_CDR=y to enable it.
+
 config TT_BH_ARC_PCIE_LTSSM_LOG_CDR_POLL_DIV
 	int "Sample the PHY's CDR lock once every N passes"
+	depends on TT_BH_ARC_PCIE_LTSSM_LOG_CDR
 	default 1
 	range 1 4096
 	help
-	  Once the link is past Detect, the recorder reads the SerDes per-lane
-	  CDR lock and logs an entry whenever it changes, so that lock
-	  asserting gets its own timestamped row on the same timebase as the
-	  LTSSM transitions.
-
-	  That costs one NOC read per lane, on top of the single read a pass
-	  otherwise needs, which lengthens the sampling pass and so widens the
-	  window in which a short-lived LTSSM state can be missed. Transitions
-	  within the Recovery phases can be under a microsecond apart, so on a
-	  wide link the two resolutions trade against each other.
+	  Transitions within the Recovery phases can be under a microsecond
+	  apart, so on a wide link CDR resolution and LTSSM edge capture trade
+	  against each other.
 
 	  1 polls on every pass, giving the finest view of when CDR locked at
 	  the largest cost to LTSSM edge capture. Raise it to protect LTSSM

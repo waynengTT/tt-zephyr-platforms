@@ -48,6 +48,7 @@
  * AlphaCore windows ConfigurePCIeTlbs() programs are TLBs 0 and 1, which eth
  * and the throttler reprogram at runtime. One TLB per SerDes instance, so a
  * x16 link reads all 16 lanes without retargeting anything between lanes.
+ * Only programmed when built with CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG_CDR.
  */
 #define PCIE_LTSSM_PHY0_TLB        7
 #define PCIE_LTSSM_PHY1_TLB        8
@@ -495,6 +496,7 @@ static uint64_t LtssmTimestamp(void)
 	return second < first ? second : first;
 }
 
+#ifdef CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG_CDR
 /*
  * Read CDR lock for the first @a lanes lanes of whichever instance this
  * thread's PHY TLBs currently point at, as a bitmap with one bit per lane,
@@ -527,6 +529,7 @@ static uint32_t ReadCdrLock(uint8_t lanes)
  * S_DETECT_QUIET, S_DETECT_ACT, S_PRE_DETECT_QUIET and S_DETECT_WAIT.
  */
 #define LTSSM_DETECT_STATES (BIT64(0x00) | BIT64(0x01) | BIT64(0x05) | BIT64(0x06))
+#endif /* CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG_CDR */
 
 /*
  * Record LTSSM transitions for as long as the firmware runs.
@@ -553,7 +556,11 @@ static void CaptureLtssmTraining(uint8_t inst_mask, const uint8_t *lanes)
 {
 	uint8_t last_state[2] = {LTSSM_STATE_NONE, LTSSM_STATE_NONE};
 	uint32_t last_cdr[2] = {0, 0};
+#ifdef CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG_CDR
 	uint32_t poll_div[2] = {0, 0};
+#else
+	ARG_UNUSED(lanes);
+#endif
 	int8_t tlb_inst = -1;
 
 	while (true) {
@@ -574,10 +581,12 @@ static void CaptureLtssmTraining(uint8_t inst_mask, const uint8_t *lanes)
 
 				NOC2AXITlbSetup(0, PCIE_LTSSM_SII_TLB, x, PCIE_LOGICAL_Y,
 						PCIE_SII_A_REG_MAP_BASE_ADDR);
+#ifdef CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG_CDR
 				NOC2AXITlbSetup(0, PCIE_LTSSM_PHY0_TLB, x, PCIE_LOGICAL_Y,
 						CMN_A_REG_MAP_BASE_ADDR);
 				NOC2AXITlbSetup(0, PCIE_LTSSM_PHY1_TLB, x, PCIE_LOGICAL_Y,
 						CMN_A_REG_MAP_BASE_ADDR + SERDES_INST_OFFSET);
+#endif
 				tlb_inst = inst;
 			}
 
@@ -588,6 +597,7 @@ static void CaptureLtssmTraining(uint8_t inst_mask, const uint8_t *lanes)
 
 			uint8_t state = ltssm_state.f.smlh_ltssm_state_sync;
 
+#ifdef CONFIG_TT_BH_ARC_PCIE_LTSSM_LOG_CDR
 			/*
 			 * Poll the PHY once the link is past Detect, so that
 			 * CDR locking shows up as its own timestamped entry
@@ -609,6 +619,10 @@ static void CaptureLtssmTraining(uint8_t inst_mask, const uint8_t *lanes)
 				poll_div[inst] = 0;
 				cdr = ReadCdrLock(lanes[inst]);
 			}
+#else
+			/* Lane count 0: the host shows CDR as not sampled. */
+			uint32_t cdr = 0;
+#endif
 
 			/*
 			 * Cheap early-out so an unchanging link costs one
