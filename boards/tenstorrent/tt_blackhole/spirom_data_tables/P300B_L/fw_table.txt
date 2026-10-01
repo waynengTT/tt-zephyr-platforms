@@ -62,6 +62,8 @@ pci0_property_table {
   num_serdes: 0
   pcie_gen3_eq_pset_req_vec: 992
   pcie_gen3_eq_fb_mode: 1
+  pcie_gen4_eq_pset_req_vec: 992
+  pcie_gen5_eq_pset_req_vec: 992
 }
 
 pci1_property_table {
@@ -73,6 +75,8 @@ pci1_property_table {
   num_serdes: 1
   pcie_gen3_eq_pset_req_vec: 992
   pcie_gen3_eq_fb_mode: 1
+  pcie_gen4_eq_pset_req_vec: 992
+  pcie_gen5_eq_pset_req_vec: 992
 }
 
 eth_property_table {
